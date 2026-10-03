@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
+import { toast } from "sonner";
 import {
   Armchair,
   BadgeIndianRupee,
@@ -29,6 +31,7 @@ import {
   Receipt,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { logout } from "@/lib/auth/service";
 
 type NavigationItem = {
   label: string;
@@ -91,6 +94,7 @@ type DashboardShellProps = {
 
 export function DashboardShell({ children }: DashboardShellProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -118,6 +122,18 @@ export function DashboardShell({ children }: DashboardShellProps) {
       "reading-room-theme",
       useDarkTheme ? "dark" : "light",
     );
+  }
+
+  async function signOut() {
+    try {
+      await logout();
+      router.replace("/login");
+      router.refresh();
+    } catch {
+      toast.error("Could not end the session. Please try again.");
+    } finally {
+      setProfileOpen(false);
+    }
   }
 
   return (
@@ -345,7 +361,7 @@ export function DashboardShell({ children }: DashboardShellProps) {
                     </Link>
                     <button
                       type="button"
-                      onClick={() => setProfileOpen(false)}
+                      onClick={signOut}
                       className="flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-left text-xs text-destructive hover:bg-muted"
                     >
                       <LogOut size={15} /> Sign out
