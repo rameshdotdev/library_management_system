@@ -58,9 +58,13 @@ function ProtectedDashboard({ children }: { children: ReactNode }) {
           <div className="max-w-sm">
             <p className="text-sm font-semibold">Session check unavailable</p>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              The authentication service could not be reached. Your session has not been changed.
+              The authentication service could not be reached. Your session has
+              not been changed.
             </p>
-            <Link href="/login" className="mt-4 inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90">
+            <Link
+              href="/login"
+              className="mt-4 inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90"
+            >
               Continue to sign in
             </Link>
           </div>
