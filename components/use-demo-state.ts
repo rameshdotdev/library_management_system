@@ -6,7 +6,7 @@ export function useDemoState<T>(
   key: string,
   initialValue: T,
   isValid: (value: unknown) => value is T,
-): [T, Dispatch<SetStateAction<T>>] {
+): [T, Dispatch<SetStateAction<T>>, boolean] {
   const [value, setValue] = useState(initialValue);
   const [ready, setReady] = useState(false);
 
@@ -31,5 +31,5 @@ export function useDemoState<T>(
     if (ready) window.localStorage.setItem(key, JSON.stringify(value));
   }, [key, ready, value]);
 
-  return [value, setValue];
+  return [value, setValue, ready];
 }

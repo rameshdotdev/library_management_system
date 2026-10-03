@@ -103,11 +103,12 @@ export function AdmissionsPage() {
     demoAssignments,
     isAssignmentArray,
   );
-  const [slots] = useDemoState(
+  const [configuredSlots] = useDemoState(
     "reading-room-time-slots",
     defaultTimeSlots,
     isTimeSlotArray,
   );
+  const slots = configuredSlots.filter((slot) => slot.active !== false);
   const { toast, showToast, dismissToast } = useToast();
   const [step, setStep] = useState(0);
   const [completedName, setCompletedName] = useState("");
@@ -135,7 +136,8 @@ export function AdmissionsPage() {
 
   const selectedPlan = membershipPlans.find((plan) => plan.id === draft.planId);
   const selectedRoom = rooms.find((room) => room.id === draft.roomId);
-  const selectedSlot = slots.find((slot) => slot.id === draft.timeSlotId);
+  const selectedSlot =
+    slots.find((slot) => slot.id === draft.timeSlotId) ?? slots[0];
   const membershipTotal =
     (selectedPlan?.monthlyPrice ?? 0) * Number(draft.durationMonths || 0);
   const admissionFeeValue = Number(draft.admissionFee || 0);
@@ -583,8 +585,9 @@ export function AdmissionsPage() {
               </Field>
               <Field label="Time slot">
                 <select
-                  value={draft.timeSlotId}
+                  value={selectedSlot?.id ?? ""}
                   onChange={(event) => update("timeSlotId", event.target.value)}
+                  disabled={slots.length === 0}
                   className={inputClass}
                 >
                   {slots.map((slot) => (

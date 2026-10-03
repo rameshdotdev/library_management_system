@@ -118,11 +118,12 @@ export function SeatGrid({
 }
 
 export function RoomsSeatsPage() {
-  const [slots] = useDemoState(
+  const [configuredSlots] = useDemoState(
     "reading-room-time-slots",
     defaultTimeSlots,
     isTimeSlotArray,
   );
+  const slots = configuredSlots.filter((slot) => slot.active !== false);
   const [assignments] = useDemoState(
     "reading-room-assignments",
     demoAssignments,

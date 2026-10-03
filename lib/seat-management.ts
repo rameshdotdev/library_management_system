@@ -12,6 +12,7 @@ export type TimeSlot = {
   name: string;
   startTime: string;
   endTime: string;
+  active?: boolean;
 };
 
 export type AssignmentStatus = "Active" | "Scheduled" | "Completed";
@@ -239,7 +240,8 @@ export function isTimeSlotArray(value: unknown): value is TimeSlot[] {
         typeof slot?.id === "string" &&
         typeof slot?.name === "string" &&
         typeof slot?.startTime === "string" &&
-        typeof slot?.endTime === "string",
+        typeof slot?.endTime === "string" &&
+        (slot.active === undefined || typeof slot.active === "boolean"),
     )
   );
 }

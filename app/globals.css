@@ -124,6 +124,15 @@ body {
     visibility: visible !important;
   }
 
+  .reports-print,
+  .reports-print * {
+    visibility: visible !important;
+  }
+
+  .report-no-print {
+    display: none !important;
+  }
+
   .receipt-print {
     position: fixed !important;
     inset: 0 !important;

@@ -5,8 +5,12 @@ import { AdmissionsPage } from "@/components/admissions-page";
 import { ExpensesPage } from "@/components/expenses-page";
 import { FeesPaymentsPage } from "@/components/fees-payments-page";
 import { MembershipsPage } from "@/components/memberships-page";
+import { ReportsPage } from "@/components/reports-page";
 import { RoomsSeatsPage } from "@/components/rooms-seats-page";
 import { SeatAssignmentsPage } from "@/components/seat-assignments-page";
+import { SettingsPage } from "@/components/settings-page";
+import { StaffPage } from "@/components/staff-page";
+import { SubscriptionPage } from "@/components/subscription-page";
 import { StudentDetailsPage, StudentsPage } from "@/components/students-page";
 import { TimeSlotsPage } from "@/components/time-slots-page";
 
@@ -40,6 +44,10 @@ export default async function PlaceholderPage({
   if (slug === "memberships") return <MembershipsPage />;
   if (slug === "fees-payments") return <FeesPaymentsPage />;
   if (slug === "expenses") return <ExpensesPage />;
+  if (slug === "reports") return <ReportsPage />;
+  if (slug === "staff") return <StaffPage />;
+  if (slug === "settings") return <SettingsPage />;
+  if (slug === "subscription") return <SubscriptionPage />;
   if (section[0] === "students" && section[1]) {
     return <StudentDetailsPage studentId={section[1]} />;
   }

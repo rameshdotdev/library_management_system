@@ -30,11 +30,12 @@ export function SeatAssignmentsPage() {
     demoAssignments,
     isAssignmentArray,
   );
-  const [slots] = useDemoState(
+  const [configuredSlots] = useDemoState(
     "reading-room-time-slots",
     defaultTimeSlots,
     isTimeSlotArray,
   );
+  const slots = configuredSlots.filter((slot) => slot.active !== false);
   const [studentId, setStudentId] = useState(students[0].id);
   const [roomId, setRoomId] = useState(rooms[0].id);
   const [seatNumber, setSeatNumber] = useState(`${rooms[0].seatPrefix}-01`);
@@ -45,12 +46,12 @@ export function SeatAssignmentsPage() {
   const [messageIsError, setMessageIsError] = useState(false);
 
   const selectedRoom = rooms.find((room) => room.id === roomId) ?? rooms[0];
-  const selectedSlot = slots.find((slot) => slot.id === slotId);
+  const selectedSlot = slots.find((slot) => slot.id === slotId) ?? slots[0];
 
   function assignSeat(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const student = students.find((item) => item.id === studentId);
-    const slot = slots.find((item) => item.id === slotId);
+    const slot = selectedSlot;
     if (!student || !slot) {
       report("Choose a valid student and time slot.", true);
       return;
@@ -174,7 +175,7 @@ export function SeatAssignmentsPage() {
             </div>
             <Field label="Time slot">
               <select
-                value={slotId}
+                value={selectedSlot?.id ?? ""}
                 onChange={(event) => setSlotId(event.target.value)}
                 required
                 disabled={slots.length === 0}

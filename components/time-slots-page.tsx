@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { Clock3, Plus, Trash2 } from "lucide-react";
+import { Clock3, Plus, Power } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { useDemoState } from "@/components/use-demo-state";
 import {
@@ -41,6 +41,7 @@ export function TimeSlotsPage() {
       name: name.trim(),
       startTime,
       endTime,
+      active: true,
     };
     setSlots((current) => [...current, nextSlot]);
     setName("");
@@ -66,16 +67,20 @@ export function TimeSlotsPage() {
               </span>
               <button
                 type="button"
-                aria-label={`Remove ${slot.name} slot`}
-                title={`Remove ${slot.name}`}
+                aria-label={`${slot.active === false ? "Activate" : "Deactivate"} ${slot.name} slot`}
+                title={`${slot.active === false ? "Activate" : "Deactivate"} ${slot.name}`}
                 onClick={() =>
                   setSlots((current) =>
-                    current.filter((item) => item.id !== slot.id),
+                    current.map((item) =>
+                      item.id === slot.id
+                        ? { ...item, active: item.active === false }
+                        : item,
+                    ),
                   )
                 }
-                className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                className={`grid size-8 place-items-center rounded-md ${slot.active === false ? "text-muted-foreground hover:bg-primary/10 hover:text-primary" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"}`}
               >
-                <Trash2 size={15} />
+                <Power size={15} />
               </button>
             </div>
             <h2 className="mt-4 text-sm font-semibold">{slot.name}</h2>
@@ -85,6 +90,11 @@ export function TimeSlotsPage() {
             <p className="mt-1 text-xs text-muted-foreground">
               {durationLabel(slot.startTime, slot.endTime)}
             </p>
+            <p
+              className={`mt-2 text-[11px] font-medium ${slot.active === false ? "text-muted-foreground" : "text-primary"}`}
+            >
+              {slot.active === false ? "Inactive · history retained" : "Active"}
+            </p>
           </Card>
         ))}
       </section>
@@ -93,7 +103,8 @@ export function TimeSlotsPage() {
         <div className="mb-4">
           <h2 className="text-base font-semibold">Add a time slot</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Slots may overlap; assignments are checked against exact hours.
+            Inactive slots remain in history and cannot be selected for new
+            assignments. Overlaps are checked against exact hours.
           </p>
         </div>
         <form
