@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useState, type FormEvent, type ReactNode } from "react";
 import {
   Armchair,
@@ -28,6 +29,7 @@ import {
   rooms,
   type SeatAssignment,
 } from "@/lib/seat-management";
+import { generateAdmissionEmail } from "@/lib/admissions";
 import {
   demoStudents,
   isStudentArray,
@@ -51,9 +53,10 @@ const currency = new Intl.NumberFormat("en-IN", {
 
 type AdmissionDraft = {
   name: string;
-  email: string;
   phone: string;
   guardianName: string;
+  guardianPhone: string;
+  documentImageDataUrl: string;
   planId: string;
   durationMonths: string;
   roomId: string;
@@ -112,13 +115,15 @@ export function AdmissionsPage() {
   const { toast, showToast, dismissToast } = useToast();
   const [step, setStep] = useState(0);
   const [completedName, setCompletedName] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [draft, setDraft] = useState<AdmissionDraft>(() => {
     const today = todayValue();
     return {
       name: "",
-      email: "",
       phone: "",
       guardianName: "",
+      guardianPhone: "",
+      documentImageDataUrl: "",
       planId: membershipPlans[0].id,
       durationMonths: "1",
       roomId: rooms[0].id,
@@ -181,22 +186,11 @@ export function AdmissionsPage() {
     if (targetStep === 0) {
       if (
         !draft.name.trim() ||
-        !draft.email.trim() ||
         !draft.phone.trim() ||
-        !draft.guardianName.trim()
+        !draft.guardianName.trim() ||
+        !draft.guardianPhone.trim()
       ) {
         return "Complete the required student details to continue.";
-      }
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.email.trim())) {
-        return "Enter a valid email address.";
-      }
-      if (
-        students.some(
-          (student) =>
-            student.email.toLowerCase() === draft.email.trim().toLowerCase(),
-        )
-      ) {
-        return "A student with this email address already exists.";
       }
     }
     if (
@@ -263,7 +257,8 @@ export function AdmissionsPage() {
     setStep((current) => Math.min(4, current + 1));
   }
 
-  function confirmAdmission() {
+  async function confirmAdmission() {
+    if (isSubmitting) return;
     const invalidStep = [0, 1, 2, 3].find((index) => validateStep(index));
     if (invalidStep !== undefined) {
       setStep(invalidStep);
@@ -273,64 +268,74 @@ export function AdmissionsPage() {
       );
       return;
     }
-    const studentId = nextId(
-      "stu",
-      students.map((student) => student.id),
-    );
     const today = todayValue();
-    const student: Student = {
-      id: studentId,
-      name: draft.name.trim(),
-      email: draft.email.trim(),
-      phone: draft.phone.trim(),
-      guardianName: draft.guardianName.trim(),
-      joinedOn: draft.startDate,
-      status: "Active",
-      membershipName: selectedPlan?.name ?? "Standard",
-      membershipEndsOn: draft.endDate,
-      monthlyFee: selectedPlan?.monthlyPrice ?? 0,
-      payments: [],
-    };
-    const assignment: SeatAssignment = {
-      id: nextId(
-        "assign",
-        assignments.map((item) => item.id),
-      ),
-      studentId,
-      studentName: student.name,
-      roomId: selectedRoom?.id ?? rooms[0].id,
-      roomName: selectedRoom?.name ?? rooms[0].name,
-      seatNumber: availableSeat,
-      timeSlotId: selectedSlot?.id ?? "",
-      timeSlotName: selectedSlot?.name ?? "",
-      startTime: selectedSlot?.startTime ?? "07:00",
-      endTime: selectedSlot?.endTime ?? "15:00",
-      startDate: draft.startDate,
-      endDate: draft.endDate,
-      status: draft.startDate > today ? "Scheduled" : "Active",
-      createdAt: today,
-    };
-    const paidAmount = Number(draft.initialPayment);
-    if (paidAmount > 0) {
-      student.payments.push({
-        id: nextId(
-          "pay",
-          students.flatMap((item) => item.payments).map((item) => item.id),
-        ),
-        date: today,
-        amount: paidAmount,
-        method: draft.paymentMethod,
-        reference: `ADM-${studentId.toUpperCase()}`,
-        description: "Initial admission payment",
+    setIsSubmitting(true);
+    try {
+      const response = await fetch("/api/v1/admissions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: draft.name.trim(),
+          phone: draft.phone.trim(),
+          guardianName: draft.guardianName.trim(),
+          guardianPhone: draft.guardianPhone.trim(),
+          documentImageDataUrl: draft.documentImageDataUrl,
+          planId: draft.planId,
+          durationMonths: draft.durationMonths,
+          startDate: draft.startDate,
+          endDate: draft.endDate,
+          admissionFee: draft.admissionFee,
+          deposit: draft.deposit,
+          discount: draft.discount,
+          initialPayment: draft.initialPayment,
+          paymentMethod: draft.paymentMethod,
+        }),
       });
+      const payload = (await response.json()) as {
+        student?: Student;
+        message?: string;
+      };
+      if (!response.ok || !payload.student) {
+        throw new Error(payload.message ?? "Admission could not be saved.");
+      }
+
+      const student = payload.student;
+      const assignment: SeatAssignment = {
+        id: nextId(
+          "assign",
+          assignments.map((item) => item.id),
+        ),
+        studentId: student.id,
+        studentName: student.name,
+        roomId: selectedRoom?.id ?? rooms[0].id,
+        roomName: selectedRoom?.name ?? rooms[0].name,
+        seatNumber: availableSeat,
+        timeSlotId: selectedSlot?.id ?? "",
+        timeSlotName: selectedSlot?.name ?? "",
+        startTime: selectedSlot?.startTime ?? "07:00",
+        endTime: selectedSlot?.endTime ?? "15:00",
+        startDate: draft.startDate,
+        endDate: draft.endDate,
+        status: draft.startDate > today ? "Scheduled" : "Active",
+        createdAt: today,
+      };
+      setStudents((current) => [student, ...current]);
+      setAssignments((current) => [assignment, ...current]);
+      setCompletedName(student.name);
+      showToast(
+        `${student.name} was admitted and assigned ${assignment.seatNumber}.`,
+        "success",
+      );
+    } catch (error) {
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "Admission could not be saved.",
+        "error",
+      );
+    } finally {
+      setIsSubmitting(false);
     }
-    setStudents((current) => [student, ...current]);
-    setAssignments((current) => [assignment, ...current]);
-    setCompletedName(student.name);
-    showToast(
-      `${student.name} was admitted and assigned ${assignment.seatNumber}.`,
-      "success",
-    );
   }
 
   function startAnotherAdmission() {
@@ -338,9 +343,10 @@ export function AdmissionsPage() {
     setDraft((current) => ({
       ...current,
       name: "",
-      email: "",
       phone: "",
       guardianName: "",
+      guardianPhone: "",
+      documentImageDataUrl: "",
       startDate: today,
       endDate: addDays(today, 30),
       initialPayment: "0",
@@ -364,8 +370,8 @@ export function AdmissionsPage() {
             Welcome, {completedName}
           </h2>
           <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-muted-foreground">
-            Student profile and seat assignment were added to this browser’s
-            demo data. This confirmation does not create a server record.
+            Student profile and initial payment were saved to your library. Seat
+            availability and assignment are still stored in this browser.
           </p>
           <div className="mt-6 flex flex-wrap justify-center gap-2">
             {admitted && (
@@ -399,8 +405,8 @@ export function AdmissionsPage() {
             payment.
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Demo validation only · availability is based on this browser’s saved
-            assignments
+            Student details save to your library · seat availability uses this
+            browser’s saved assignments
           </p>
         </div>
         <Link
@@ -480,16 +486,6 @@ export function AdmissionsPage() {
                   placeholder="e.g. Ishita Rao"
                 />
               </Field>
-              <Field label="Email address">
-                <input
-                  required
-                  type="email"
-                  value={draft.email}
-                  onChange={(event) => update("email", event.target.value)}
-                  className={inputClass}
-                  placeholder="student@example.com"
-                />
-              </Field>
               <Field label="Phone number">
                 <input
                   required
@@ -510,6 +506,67 @@ export function AdmissionsPage() {
                   className={inputClass}
                   placeholder="Full name"
                 />
+              </Field>
+              <Field label="Guardian contact number">
+                <input
+                  required
+                  type="tel"
+                  value={draft.guardianPhone}
+                  onChange={(event) =>
+                    update("guardianPhone", event.target.value)
+                  }
+                  className={inputClass}
+                  placeholder="+91 98765 43210"
+                />
+              </Field>
+              <Field label="Document image (optional)">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0];
+                    if (!file) {
+                      update("documentImageDataUrl", "");
+                      return;
+                    }
+                    if (!file.type.startsWith("image/")) {
+                      showToast("Choose an image file.", "error");
+                      event.currentTarget.value = "";
+                      return;
+                    }
+                    if (file.size > 1024 * 1024) {
+                      showToast(
+                        "The document image must be 1 MB or smaller.",
+                        "error",
+                      );
+                      event.currentTarget.value = "";
+                      return;
+                    }
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      if (typeof reader.result === "string") {
+                        update("documentImageDataUrl", reader.result);
+                      }
+                    };
+                    reader.onerror = () =>
+                      showToast(
+                        "The document image could not be read.",
+                        "error",
+                      );
+                    reader.readAsDataURL(file);
+                  }}
+                  className={inputClass}
+                />
+                {draft.documentImageDataUrl && (
+                  <Image
+                    src={draft.documentImageDataUrl}
+                    alt="Uploaded document preview"
+                    width={320}
+                    height={180}
+                    unoptimized
+                    className="mt-2 max-h-36 w-auto rounded-md border border-border object-contain"
+                  />
+                )}
               </Field>
               <p className="text-xs text-muted-foreground sm:col-span-2">
                 A profile is created after the final review. All details remain
@@ -750,7 +807,7 @@ export function AdmissionsPage() {
                 <ReviewLine label="Name" value={draft.name || "Not provided"} />
                 <ReviewLine
                   label="Email"
-                  value={draft.email || "Not provided"}
+                  value={generateAdmissionEmail(draft.name || "student")}
                 />
                 <ReviewLine
                   label="Phone"
@@ -759,6 +816,16 @@ export function AdmissionsPage() {
                 <ReviewLine
                   label="Guardian"
                   value={draft.guardianName || "Not provided"}
+                />
+                <ReviewLine
+                  label="Guardian contact"
+                  value={draft.guardianPhone || "Not provided"}
+                />
+                <ReviewLine
+                  label="Document image"
+                  value={
+                    draft.documentImageDataUrl ? "Uploaded" : "Not provided"
+                  }
                 />
               </ReviewGroup>
               <ReviewGroup title="Membership" icon={BadgeCheck}>
@@ -850,9 +917,11 @@ export function AdmissionsPage() {
                 <button
                   type="button"
                   onClick={confirmAdmission}
+                  disabled={isSubmitting}
                   className="inline-flex h-10 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90"
                 >
-                  <Check size={15} /> Confirm admission
+                  <Check size={15} />
+                  {isSubmitting ? "Saving admission..." : "Confirm admission"}
                 </button>
               )}
             </div>

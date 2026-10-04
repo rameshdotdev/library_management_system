@@ -1,38 +1,53 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
-
-import { demoStudents, type Student } from "@/lib/student-management";
+import mongoose from "mongoose";
+import { studentUpdateSchema } from "@/lib/student-api-schema";
+import {
+  authorizeStudentRequest,
+  isDuplicateKeyError,
+  serializeStudent,
+} from "@/lib/server/student-api";
+import { StudentModel } from "@/models/Student";
 
 export const runtime = "nodejs";
 
-let studentStore: Student[] = [...demoStudents];
-
-const studentUpdateSchema = z.object({
-  name: z.string().trim().min(1).optional(),
-  email: z.string().trim().email().optional(),
-  phone: z.string().trim().min(1).optional(),
-  guardianName: z.string().trim().min(1).optional(),
-  status: z.enum(["Active", "On hold", "Archived"]).optional(),
-  membershipName: z.string().trim().min(1).optional(),
-  membershipEndsOn: z.string().trim().min(1).optional(),
-  monthlyFee: z.number().nonnegative().optional(),
-});
-
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await params;
-  const student = studentStore.find((item) => item.id === id);
+  try {
+    const access = await authorizeStudentRequest(request);
+    if ("response" in access) return access.response;
 
-  if (!student) {
+    const { id } = await params;
+    if (!mongoose.isValidObjectId(id)) {
+      return NextResponse.json(
+        { success: false, message: "Student not found." },
+        { status: 404 },
+      );
+    }
+    const student = await StudentModel.findOne({
+      _id: id,
+      libraryId: access.libraryId,
+    }).lean();
+
+    if (!student) {
+      return NextResponse.json(
+        { success: false, message: "Student not found." },
+        { status: 404 },
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      student: serializeStudent(student),
+    });
+  } catch (error) {
+    console.error("Get student failed", error);
     return NextResponse.json(
-      { success: false, message: "Student not found." },
-      { status: 404 },
+      { success: false, message: "Student could not be loaded." },
+      { status: 500 },
     );
   }
-
-  return NextResponse.json({ success: true, student });
 }
 
 export async function PATCH(
@@ -40,7 +55,16 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const access = await authorizeStudentRequest(request);
+    if ("response" in access) return access.response;
+
     const { id } = await params;
+    if (!mongoose.isValidObjectId(id)) {
+      return NextResponse.json(
+        { success: false, message: "Student not found." },
+        { status: 404 },
+      );
+    }
     const body = await request.json().catch(() => null);
     const parsed = studentUpdateSchema.safeParse(body);
 
@@ -55,9 +79,11 @@ export async function PATCH(
       );
     }
 
-    const index = studentStore.findIndex((student) => student.id === id);
-
-    if (index === -1) {
+    const current = await StudentModel.findOne({
+      _id: id,
+      libraryId: access.libraryId,
+    });
+    if (!current) {
       return NextResponse.json(
         { success: false, message: "Student not found." },
         { status: 404 },
@@ -65,15 +91,13 @@ export async function PATCH(
     }
 
     const nextValues = parsed.data;
-    const current = studentStore[index];
-
     if (
       nextValues.email &&
-      studentStore.some(
-        (student) =>
-          student.id !== id &&
-          student.email.toLowerCase() === nextValues.email!.toLowerCase(),
-      )
+      (await StudentModel.exists({
+        libraryId: access.libraryId,
+        _id: { $ne: id },
+        email: nextValues.email,
+      }))
     ) {
       return NextResponse.json(
         {
@@ -84,16 +108,24 @@ export async function PATCH(
       );
     }
 
-    studentStore[index] = {
-      ...current,
-      ...nextValues,
-    };
+    Object.assign(current, nextValues);
+    await current.save();
 
     return NextResponse.json({
       success: true,
-      student: studentStore[index],
+      student: serializeStudent(current.toObject()),
     });
-  } catch {
+  } catch (error) {
+    if (isDuplicateKeyError(error)) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "A student with this email already exists.",
+        },
+        { status: 409 },
+      );
+    }
+    console.error("Update student failed", error);
     return NextResponse.json(
       { success: false, message: "Student could not be updated." },
       { status: 500 },
@@ -102,23 +134,43 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await params;
-  const index = studentStore.findIndex((student) => student.id === id);
+  try {
+    const access = await authorizeStudentRequest(request);
+    if ("response" in access) return access.response;
 
-  if (index === -1) {
+    const { id } = await params;
+    if (!mongoose.isValidObjectId(id)) {
+      return NextResponse.json(
+        { success: false, message: "Student not found." },
+        { status: 404 },
+      );
+    }
+    const student = await StudentModel.findOne({
+      _id: id,
+      libraryId: access.libraryId,
+    });
+    if (!student) {
+      return NextResponse.json(
+        { success: false, message: "Student not found." },
+        { status: 404 },
+      );
+    }
+
+    student.status = "Archived";
+    await student.save();
+
+    return NextResponse.json({
+      success: true,
+      student: serializeStudent(student.toObject()),
+    });
+  } catch (error) {
+    console.error("Archive student failed", error);
     return NextResponse.json(
-      { success: false, message: "Student not found." },
-      { status: 404 },
+      { success: false, message: "Student could not be archived." },
+      { status: 500 },
     );
   }
-
-  studentStore[index] = {
-    ...studentStore[index],
-    status: "Archived",
-  };
-
-  return NextResponse.json({ success: true, student: studentStore[index] });
 }

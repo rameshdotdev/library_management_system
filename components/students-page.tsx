@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useEffect, useState, type FormEvent } from "react";
 import {
   Archive,
@@ -49,6 +50,8 @@ type StudentFormValues = Pick<
   | "email"
   | "phone"
   | "guardianName"
+  | "guardianPhone"
+  | "documentImageDataUrl"
   | "status"
   | "membershipName"
   | "membershipEndsOn"
@@ -109,6 +112,8 @@ function StudentFormDialog({
           email: student.email,
           phone: student.phone,
           guardianName: student.guardianName,
+          guardianPhone: student.guardianPhone ?? "",
+          documentImageDataUrl: student.documentImageDataUrl ?? "",
           status: student.status,
           membershipName: student.membershipName,
           membershipEndsOn: student.membershipEndsOn,
@@ -119,6 +124,8 @@ function StudentFormDialog({
           email: "",
           phone: "",
           guardianName: "",
+          guardianPhone: "",
+          documentImageDataUrl: "",
           status: "Active",
           membershipName: "Standard",
           membershipEndsOn: "2026-12-31",
@@ -205,6 +212,58 @@ function StudentFormDialog({
               onChange={(event) => update("guardianName", event.target.value)}
               className={inputClass}
             />
+          </Field>
+          <Field label="Guardian contact" className="sm:col-span-2">
+            <input
+              type="tel"
+              value={values.guardianPhone ?? ""}
+              onChange={(event) => update("guardianPhone", event.target.value)}
+              className={inputClass}
+            />
+          </Field>
+          <Field label="Document image" className="sm:col-span-2">
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+                if (!file.type.startsWith("image/") || file.size > 1_000_000) {
+                  event.target.value = "";
+                  return;
+                }
+                const reader = new FileReader();
+                reader.onload = () => {
+                  if (typeof reader.result === "string") {
+                    update("documentImageDataUrl", reader.result);
+                  }
+                };
+                reader.readAsDataURL(file);
+              }}
+              className={inputClass}
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Image files up to 1 MB.
+            </p>
+            {values.documentImageDataUrl && (
+              <div className="mt-3 flex items-start gap-3">
+                <Image
+                  src={values.documentImageDataUrl}
+                  alt="Student document preview"
+                  width={160}
+                  height={110}
+                  unoptimized
+                  className="h-24 w-36 rounded-md border border-border object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => update("documentImageDataUrl", "")}
+                  className="text-sm text-destructive hover:underline"
+                >
+                  Remove image
+                </button>
+              </div>
+            )}
           </Field>
           <Field label="Membership plan">
             <select
@@ -965,6 +1024,10 @@ export function StudentDetailsPage({ studentId }: { studentId: string }) {
             <DetailRow label="Email" value={student.email} />
             <DetailRow label="Phone" value={student.phone} />
             <DetailRow label="Parent / guardian" value={student.guardianName} />
+            <DetailRow
+              label="Guardian contact"
+              value={student.guardianPhone || "Not provided"}
+            />
           </dl>
         </Card>
         <Card className="p-4 sm:p-5">
@@ -1012,6 +1075,31 @@ export function StudentDetailsPage({ studentId }: { studentId: string }) {
           )}
         </Card>
       </section>
+
+      <Card className="p-4 sm:p-5">
+        <h3 className="text-sm font-semibold">Document image</h3>
+        {student.documentImageDataUrl ? (
+          <a
+            href={student.documentImageDataUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-3 inline-block"
+          >
+            <Image
+              src={student.documentImageDataUrl}
+              alt={`${student.name} document`}
+              width={640}
+              height={420}
+              unoptimized
+              className="max-h-80 w-auto max-w-full rounded-md border border-border object-contain"
+            />
+          </a>
+        ) : (
+          <p className="mt-2 text-sm text-muted-foreground">
+            No document image uploaded.
+          </p>
+        )}
+      </Card>
 
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between gap-3 px-4 py-4 sm:px-5">

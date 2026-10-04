@@ -19,6 +19,8 @@ export type Student = {
   email: string;
   phone: string;
   guardianName: string;
+  guardianPhone?: string;
+  documentImageDataUrl?: string;
   joinedOn: string;
   status: StudentStatus;
   membershipName: string;
