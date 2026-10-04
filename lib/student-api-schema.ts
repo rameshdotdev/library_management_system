@@ -5,7 +5,7 @@ export const studentDocumentImageSchema = z
     z.literal(""),
     z
       .string()
-      .regex(/^data:image\/(?:jpeg|png|webp|gif);base64,/i)
+      .regex(/^data:image\/(?:jpeg|png|webp);base64,/i)
       .max(1_400_000),
   ])
   .optional();

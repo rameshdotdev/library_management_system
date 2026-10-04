@@ -17,6 +17,8 @@ import {
 import { FinanceSummary } from "@/components/finance-shared";
 import { Card } from "@/components/ui/card";
 import { inputClass } from "@/components/ui/field";
+import { useRooms } from "@/components/use-rooms";
+import { useLibraryConfiguration } from "@/components/use-library-configuration";
 import { useDemoState } from "@/components/use-demo-state";
 import {
   demoExpenses,
@@ -39,13 +41,7 @@ import {
   seatUtilization,
   type ReportPeriod,
 } from "@/lib/report-management";
-import {
-  demoAssignments,
-  defaultTimeSlots,
-  isAssignmentArray,
-  isTimeSlotArray,
-  rooms,
-} from "@/lib/seat-management";
+import { demoAssignments, isAssignmentArray } from "@/lib/seat-management";
 import { demoStudents, isStudentArray } from "@/lib/student-management";
 
 const reportTabs = [
@@ -215,6 +211,8 @@ function BarBreakdown({
 }
 
 export function ReportsPage() {
+  const { rooms } = useRooms();
+  const { configuration } = useLibraryConfiguration();
   const [students] = useDemoState(
     "reading-room-students",
     demoStudents,
@@ -235,11 +233,7 @@ export function ReportsPage() {
     demoAssignments,
     isAssignmentArray,
   );
-  const [slots] = useDemoState(
-    "reading-room-time-slots",
-    defaultTimeSlots,
-    isTimeSlotArray,
-  );
+  const slots = configuration.timeSlots.filter((slot) => slot.active !== false);
   const today = getLocalDate();
   const [period, setPeriod] = useState<ReportPeriod>("this-month");
   const [range, setRange] = useState(() =>

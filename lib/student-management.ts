@@ -20,7 +20,8 @@ export type Student = {
   phone: string;
   guardianName: string;
   guardianPhone?: string;
-  documentImageDataUrl?: string;
+  documentImageUrl?: string;
+  documentImagePublicId?: string;
   joinedOn: string;
   status: StudentStatus;
   membershipName: string;
@@ -34,6 +35,7 @@ export type MembershipPlan = {
   name: string;
   monthlyPrice: number;
   description: string;
+  active?: boolean;
 };
 
 export const membershipPlans: MembershipPlan[] = [
@@ -56,6 +58,22 @@ export const membershipPlans: MembershipPlan[] = [
     description: "Full-day access for focused exam preparation",
   },
 ];
+
+export function isMembershipPlanArray(
+  value: unknown,
+): value is MembershipPlan[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (plan) =>
+        typeof plan?.id === "string" &&
+        typeof plan?.name === "string" &&
+        typeof plan?.monthlyPrice === "number" &&
+        typeof plan?.description === "string" &&
+        (plan.active === undefined || typeof plan.active === "boolean"),
+    )
+  );
+}
 
 export const demoStudents: Student[] = [
   {

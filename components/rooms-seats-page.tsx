@@ -1,18 +1,16 @@
 "use client";
 
-import { useState } from "react";
-import { Armchair, Building2, Layers3 } from "lucide-react";
+import { useState, type FormEvent } from "react";
+import { Armchair, Building2, Layers3, Plus, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { useDemoState } from "@/components/use-demo-state";
+import { useRooms } from "@/components/use-rooms";
+import { useLibraryConfiguration } from "@/components/use-library-configuration";
+import { useSeatAssignments } from "@/components/use-seat-assignments";
 import {
   dateRangesOverlap,
-  demoAssignments,
   defaultTimeSlots,
   formatTimeRange,
   intervalsOverlap,
-  isAssignmentArray,
-  isTimeSlotArray,
-  rooms,
   type Room,
   type SeatAssignment,
   type TimeSlot,
@@ -118,25 +116,32 @@ export function SeatGrid({
 }
 
 export function RoomsSeatsPage() {
-  const [configuredSlots] = useDemoState(
-    "reading-room-time-slots",
-    defaultTimeSlots,
-    isTimeSlotArray,
-  );
-  const slots = configuredSlots.filter((slot) => slot.active !== false);
-  const [assignments] = useDemoState(
-    "reading-room-assignments",
-    demoAssignments,
-    isAssignmentArray,
-  );
-  const [roomId, setRoomId] = useState(rooms[0].id);
+  const { rooms, setRooms, loading, error } = useRooms();
+  const { configuration } = useLibraryConfiguration();
+  const slots = configuration.timeSlots.filter((slot) => slot.active !== false);
+  const {
+    assignments,
+    loading: assignmentsLoading,
+    error: assignmentsError,
+  } = useSeatAssignments();
+  const [roomId, setRoomId] = useState("");
   const [selectedDate, setSelectedDate] = useState(todayValue);
   const [slotId, setSlotId] = useState(defaultTimeSlots[0].id);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [roomForm, setRoomForm] = useState({
+    name: "",
+    floor: "Ground floor",
+    description: "",
+    seatPrefix: "A",
+    capacity: "20",
+  });
   const room = rooms.find((item) => item.id === roomId) ?? rooms[0];
   const selectedSlot = slots.find((slot) => slot.id === slotId) ?? slots[0];
   const occupiedCount = assignments.filter(
     (assignment) =>
-      assignment.roomId === room.id &&
+      assignment.roomId === room?.id &&
       dateRangesOverlap(
         assignment.startDate,
         assignment.endDate,
@@ -153,83 +158,148 @@ export function RoomsSeatsPage() {
   ).length;
   const floors = Array.from(new Set(rooms.map((item) => item.floor)));
 
+  async function createRoom(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setFormError("");
+    try {
+      const response = await fetch("/api/v1/rooms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...roomForm,
+          capacity: Number(roomForm.capacity),
+        }),
+      });
+      const payload = (await response.json()) as {
+        room?: Room;
+        message?: string;
+      };
+      if (!response.ok || !payload.room) {
+        throw new Error(payload.message ?? "Room could not be created.");
+      }
+      setRooms((current) => [...current, payload.room!]);
+      setRoomId(payload.room.id);
+      setRoomForm({
+        name: "",
+        floor: "Ground floor",
+        description: "",
+        seatPrefix: "A",
+        capacity: "20",
+      });
+      setDialogOpen(false);
+    } catch (createError) {
+      setFormError(
+        createError instanceof Error
+          ? createError.message
+          : "Room could not be created.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="space-y-5">
       <section className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-sm text-muted-foreground">
-            Browse rooms by floor and inspect live seat availability.
+            Create rooms and seats, then inspect availability by date and slot.
           </p>
         </div>
-        <p className="text-xs text-muted-foreground">
-          Demo data · changes stay in this browser
-        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setFormError("");
+            setDialogOpen(true);
+          }}
+          className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90"
+        >
+          <Plus size={15} /> Add room
+        </button>
       </section>
 
       <section className="grid gap-3 sm:grid-cols-3" aria-label="Room summary">
         <SummaryCard
           icon={Building2}
           label="Reading rooms"
-          value={String(rooms.length)}
+          value={loading ? "…" : String(rooms.length)}
         />
         <SummaryCard
           icon={Layers3}
           label="Floors"
-          value={String(floors.length)}
+          value={loading ? "…" : String(floors.length)}
         />
         <SummaryCard
           icon={Armchair}
           label="Seats in selected room"
-          value={`${room.capacity}`}
+          value={room ? String(room.capacity) : "0"}
         />
       </section>
+
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+      {assignmentsError && (
+        <p role="alert" className="text-sm text-destructive">
+          {assignmentsError}
+        </p>
+      )}
 
       <section className="grid gap-4 xl:grid-cols-[minmax(290px,0.8fr)_minmax(0,1.6fr)]">
         <Card className="p-4 sm:p-5">
           <div className="mb-4">
             <h2 className="text-base font-semibold">Rooms & floors</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Select a room to view its seats.
+              {loading ? "Loading rooms…" : "Select a room to view its seats."}
             </p>
           </div>
-          <div className="space-y-5">
-            {floors.map((floor) => (
-              <div key={floor}>
-                <h3 className="mb-2 text-[11px] font-semibold uppercase text-muted-foreground">
-                  {floor}
-                </h3>
-                <div className="space-y-2">
-                  {rooms
-                    .filter((item) => item.floor === floor)
-                    .map((item) => (
-                      <button
-                        type="button"
-                        key={item.id}
-                        onClick={() => setRoomId(item.id)}
-                        aria-pressed={room.id === item.id}
-                        className={`w-full rounded-md border p-3 text-left transition-colors ${
-                          room.id === item.id
-                            ? "border-primary/50 bg-secondary/70"
-                            : "border-border hover:bg-muted/60"
-                        }`}
-                      >
-                        <span className="flex items-center justify-between gap-2">
-                          <span className="text-sm font-medium">
-                            {item.name}
+          {rooms.length ? (
+            <div className="space-y-5">
+              {floors.map((floor) => (
+                <div key={floor}>
+                  <h3 className="mb-2 text-[11px] font-semibold uppercase text-muted-foreground">
+                    {floor}
+                  </h3>
+                  <div className="space-y-2">
+                    {rooms
+                      .filter((item) => item.floor === floor)
+                      .map((item) => (
+                        <button
+                          type="button"
+                          key={item.id}
+                          onClick={() => setRoomId(item.id)}
+                          aria-pressed={room.id === item.id}
+                          className={`w-full rounded-md border p-3 text-left transition-colors ${
+                            room.id === item.id
+                              ? "border-primary/50 bg-secondary/70"
+                              : "border-border hover:bg-muted/60"
+                          }`}
+                        >
+                          <span className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-medium">
+                              {item.name}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {item.capacity} seats
+                            </span>
                           </span>
-                          <span className="text-xs text-muted-foreground">
-                            {item.capacity} seats
+                          <span className="mt-1 block text-xs text-muted-foreground">
+                            {item.description}
                           </span>
-                        </span>
-                        <span className="mt-1 block text-xs text-muted-foreground">
-                          {item.description}
-                        </span>
-                      </button>
-                    ))}
+                        </button>
+                      ))}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            !loading && (
+              <p className="text-sm text-muted-foreground">No rooms found.</p>
+            )
+          )}
         </Card>
 
         <div className="min-w-0 space-y-4">
@@ -238,9 +308,10 @@ export function RoomsSeatsPage() {
               <label className="block text-xs font-medium text-muted-foreground">
                 Room
                 <select
-                  value={room.id}
+                  value={room?.id ?? ""}
                   onChange={(event) => setRoomId(event.target.value)}
-                  className="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                  disabled={!rooms.length}
+                  className="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground disabled:opacity-50"
                 >
                   {rooms.map((item) => (
                     <option key={item.id} value={item.id}>
@@ -276,19 +347,165 @@ export function RoomsSeatsPage() {
               </label>
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
-              {room.capacity - occupiedCount} seats available for this date and
-              slot.
+              {assignmentsLoading
+                ? "Loading availability…"
+                : `${room ? room.capacity - occupiedCount : 0} seats available for this date and slot.`}
             </p>
           </Card>
-          <SeatGrid
-            room={room}
-            selectedDate={selectedDate}
-            selectedSlot={selectedSlot ?? defaultTimeSlots[0]}
-            slots={slots}
-            assignments={assignments}
-          />
+          {room ? (
+            <SeatGrid
+              room={room}
+              selectedDate={selectedDate}
+              selectedSlot={selectedSlot ?? defaultTimeSlots[0]}
+              slots={slots}
+              assignments={assignments}
+            />
+          ) : (
+            <Card className="p-8 text-center text-sm text-muted-foreground">
+              Create a room to start adding seats.
+            </Card>
+          )}
         </div>
       </section>
+
+      {dialogOpen && (
+        <div className="fixed inset-0 z-70 grid place-items-center overflow-y-auto bg-foreground/40 p-4">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-room-title"
+            className="my-auto w-full max-w-lg rounded-lg border border-border bg-card p-5 text-card-foreground shadow-xl sm:p-6"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 id="create-room-title" className="text-lg font-semibold">
+                  Create room
+                </h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Seats are generated from the prefix and seat count.
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close create room dialog"
+                onClick={() => setDialogOpen(false)}
+                className="rounded p-1 text-muted-foreground hover:bg-muted"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <form
+              onSubmit={createRoom}
+              className="mt-5 grid gap-4 sm:grid-cols-2"
+            >
+              <label className="text-xs font-medium text-muted-foreground sm:col-span-2">
+                Room name
+                <input
+                  required
+                  minLength={2}
+                  maxLength={80}
+                  value={roomForm.name}
+                  onChange={(event) =>
+                    setRoomForm((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
+                  }
+                  className="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                />
+              </label>
+              <label className="text-xs font-medium text-muted-foreground">
+                Floor
+                <input
+                  required
+                  maxLength={40}
+                  value={roomForm.floor}
+                  onChange={(event) =>
+                    setRoomForm((current) => ({
+                      ...current,
+                      floor: event.target.value,
+                    }))
+                  }
+                  className="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                />
+              </label>
+              <label className="text-xs font-medium text-muted-foreground">
+                Seat prefix
+                <input
+                  required
+                  maxLength={4}
+                  pattern="[A-Za-z0-9]{1,4}"
+                  value={roomForm.seatPrefix}
+                  onChange={(event) =>
+                    setRoomForm((current) => ({
+                      ...current,
+                      seatPrefix: event.target.value.toUpperCase(),
+                    }))
+                  }
+                  className="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                />
+              </label>
+              <label className="text-xs font-medium text-muted-foreground">
+                Number of seats
+                <input
+                  required
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={roomForm.capacity}
+                  onChange={(event) =>
+                    setRoomForm((current) => ({
+                      ...current,
+                      capacity: event.target.value,
+                    }))
+                  }
+                  className="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                />
+              </label>
+              <label className="text-xs font-medium text-muted-foreground sm:col-span-2">
+                Description
+                <textarea
+                  maxLength={200}
+                  rows={3}
+                  value={roomForm.description}
+                  onChange={(event) =>
+                    setRoomForm((current) => ({
+                      ...current,
+                      description: event.target.value,
+                    }))
+                  }
+                  className="mt-1.5 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
+                />
+              </label>
+              {formError && (
+                <p
+                  role="alert"
+                  className="text-sm text-destructive sm:col-span-2"
+                >
+                  {formError}
+                </p>
+              )}
+              <div className="flex justify-end gap-2 sm:col-span-2">
+                <button
+                  type="button"
+                  onClick={() => setDialogOpen(false)}
+                  className="h-10 rounded-md border border-border px-4 text-sm font-medium hover:bg-muted"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="inline-flex h-10 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                >
+                  <Plus size={15} />{" "}
+                  {saving ? "Creating…" : "Create room & seats"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

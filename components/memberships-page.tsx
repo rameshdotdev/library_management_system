@@ -2,14 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import {
-  BadgeIndianRupee,
-  CalendarClock,
-  CircleAlert,
-  Clock3,
-  Search,
-  UsersRound,
-} from "lucide-react";
+import { CalendarClock, CircleAlert, Search, UsersRound } from "lucide-react";
 import {
   FinanceSummary,
   Pagination,
@@ -19,6 +12,7 @@ import { Card } from "@/components/ui/card";
 import { Field, inputClass } from "@/components/ui/field";
 import { ToastViewport, useToast } from "@/components/ui/toast";
 import { useDemoState } from "@/components/use-demo-state";
+import { useLibraryConfiguration } from "@/components/use-library-configuration";
 import {
   demoInvoices,
   formatINR,
@@ -29,7 +23,7 @@ import {
 import {
   demoStudents,
   isStudentArray,
-  membershipPlans,
+  type MembershipPlan,
   type Student,
 } from "@/lib/student-management";
 
@@ -94,20 +88,21 @@ function stateStyle(state: string) {
 
 function RenewalDialog({
   student,
+  plans,
   onCancel,
   onConfirm,
 }: {
   student: Student;
+  plans: MembershipPlan[];
   onCancel: () => void;
   onConfirm: (planId: string, months: number) => void;
 }) {
   const [planId, setPlanId] = useState(
-    membershipPlans.find((plan) => plan.name === student.membershipName)?.id ??
-      membershipPlans[0].id,
+    plans.find((plan) => plan.name === student.membershipName)?.id ??
+      plans[0].id,
   );
   const [months, setMonths] = useState(1);
-  const plan =
-    membershipPlans.find((item) => item.id === planId) ?? membershipPlans[0];
+  const plan = plans.find((item) => item.id === planId) ?? plans[0];
   const amount = membershipCharge(plan.monthlyPrice, months);
 
   return (
@@ -131,7 +126,7 @@ function RenewalDialog({
               onChange={(event) => setPlanId(event.target.value)}
               className={inputClass}
             >
-              {membershipPlans.map((item) => (
+              {plans.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.name} · {formatINR(item.monthlyPrice)}/month
                 </option>
@@ -182,6 +177,10 @@ function RenewalDialog({
 }
 
 export function MembershipsPage() {
+  const { configuration } = useLibraryConfiguration();
+  const membershipPlans = configuration.membershipPlans.filter(
+    (plan) => plan.active !== false,
+  );
   const [students, setStudents] = useDemoState(
     "reading-room-students",
     demoStudents,
@@ -291,7 +290,7 @@ export function MembershipsPage() {
       <section className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-sm text-muted-foreground">
-            Membership plans, renewals, and upcoming expiries.
+            Track member expiry dates and create renewals from active plans.
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
             Demo membership records · saved in this browser
@@ -327,50 +326,6 @@ export function MembershipsPage() {
           detail="Renewal recommended"
           icon={CircleAlert}
         />
-        <FinanceSummary
-          label="Available plans"
-          value={String(membershipPlans.length)}
-          detail="Monthly billing · renew for 1–12 months"
-          icon={BadgeIndianRupee}
-        />
-      </section>
-
-      <section>
-        <div className="mb-3 flex items-end justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold">Membership plans</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Pricing is per month; renewal duration is selected per student.
-            </p>
-          </div>
-        </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          {membershipPlans.map((plan) => (
-            <Card key={plan.id} className="p-4 sm:p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-base font-semibold">{plan.name}</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {plan.description}
-                  </p>
-                </div>
-                <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-secondary text-primary">
-                  <BadgeIndianRupee size={17} />
-                </span>
-              </div>
-              <p className="mt-5 text-2xl font-semibold">
-                {formatINR(plan.monthlyPrice)}
-                <span className="ml-1 text-xs font-normal text-muted-foreground">
-                  / month
-                </span>
-              </p>
-              <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Clock3 size={14} /> Billing duration: 1 month, renewable for 3,
-                6, or 12 months
-              </div>
-            </Card>
-          ))}
-        </div>
       </section>
 
       <Card className="overflow-hidden">
@@ -552,6 +507,7 @@ export function MembershipsPage() {
       {renewStudent && (
         <RenewalDialog
           student={renewStudent}
+          plans={membershipPlans}
           onCancel={() => setRenewStudent(null)}
           onConfirm={renew}
         />

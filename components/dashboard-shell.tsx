@@ -13,7 +13,6 @@ import {
   BriefcaseBusiness,
   ChevronDown,
   ClipboardList,
-  Clock3,
   CreditCard,
   LayoutDashboard,
   LogOut,
@@ -55,8 +54,11 @@ const navigationGroups: { label: string; items: NavigationItem[] }[] = [
         href: "/seat-assignments",
         icon: UserRoundCheck,
       },
-      { label: "Time Slots", href: "/time-slots", icon: Clock3 },
-      { label: "Memberships", href: "/memberships", icon: BadgeIndianRupee },
+      {
+        label: "Member Renewals",
+        href: "/memberships",
+        icon: BadgeIndianRupee,
+      },
     ],
   },
   {

@@ -4,12 +4,18 @@ import { z } from "zod";
 
 import { createStudentEmail } from "@/lib/admissions";
 import {
+  CloudinaryConfigurationError,
+  deleteStudentDocument,
+  uploadStudentDocument,
+  type UploadedStudentDocument,
+} from "@/lib/server/cloudinary";
+import {
   authorizeStudentRequest,
   isDuplicateKeyError,
   serializeStudent,
 } from "@/lib/server/student-api";
+import { getOrCreateLibraryConfiguration } from "@/lib/server/library-configuration";
 import { studentDocumentImageSchema } from "@/lib/student-api-schema";
-import { membershipPlans } from "@/lib/student-management";
 import { StudentModel } from "@/models/Student";
 
 export const runtime = "nodejs";
@@ -25,7 +31,7 @@ const admissionSchema = z.object({
   guardianName: z.string().trim().min(1).max(80),
   guardianPhone: z.string().trim().min(1).max(30),
   documentImageDataUrl: studentDocumentImageSchema,
-  planId: z.enum(["standard", "plus", "exam-prep"]),
+  planId: z.string().trim().min(1).max(80),
   durationMonths: z.enum(["1", "3", "6", "12"]),
   startDate: z.string().trim().min(1),
   endDate: z.string().trim().min(1),
@@ -58,6 +64,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  let uploadedDocument: UploadedStudentDocument | undefined;
   try {
     const access = await authorizeStudentRequest(request);
     if ("response" in access) return access.response;
@@ -76,10 +83,13 @@ export async function POST(request: Request) {
       );
     }
 
-    const plan = membershipPlans.find(
+    const configuration = await getOrCreateLibraryConfiguration(
+      access.libraryId,
+    );
+    const plan = configuration?.membershipPlans.find(
       (membershipPlan) => membershipPlan.id === parsed.data.planId,
     );
-    if (!plan) {
+    if (!plan || plan.active === false) {
       return NextResponse.json(
         { success: false, message: "Choose a valid membership plan." },
         { status: 400 },
@@ -120,6 +130,9 @@ export async function POST(request: Request) {
       parsed.data.name,
       existingStudents.map((student) => student.email),
     );
+    uploadedDocument = await uploadStudentDocument(
+      parsed.data.documentImageDataUrl,
+    );
     const today = new Date().toISOString().slice(0, 10);
     const studentId = new StudentModel()._id;
     const student = await StudentModel.create({
@@ -130,7 +143,7 @@ export async function POST(request: Request) {
       phone: parsed.data.phone,
       guardianName: parsed.data.guardianName,
       guardianPhone: parsed.data.guardianPhone,
-      documentImageDataUrl: parsed.data.documentImageDataUrl,
+      ...uploadedDocument,
       membershipName: plan.name,
       membershipEndsOn: parsed.data.endDate,
       monthlyFee: plan.monthlyPrice,
@@ -157,6 +170,15 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (error) {
+    if (uploadedDocument) {
+      await deleteStudentDocument(uploadedDocument.documentImagePublicId);
+    }
+    if (error instanceof CloudinaryConfigurationError) {
+      return NextResponse.json(
+        { success: false, message: error.message },
+        { status: 503 },
+      );
+    }
     if (isDuplicateKeyError(error)) {
       return NextResponse.json(
         {

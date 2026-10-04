@@ -1,13 +1,10 @@
 "use client";
 
-import {
-  useState,
-  type Dispatch,
-  type FormEvent,
-  type SetStateAction,
-} from "react";
+import { useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import {
+  BadgeIndianRupee,
   BellRing,
   BookOpen,
   Building2,
@@ -24,27 +21,39 @@ import {
 import { Card } from "@/components/ui/card";
 import { Field, inputClass } from "@/components/ui/field";
 import { ToastViewport, useToast } from "@/components/ui/toast";
-import { useDemoState } from "@/components/use-demo-state";
+import { logout } from "@/lib/auth/service";
+import {
+  useLibraryConfiguration,
+  type LibraryConfiguration,
+} from "@/components/use-library-configuration";
 import { intervalsOverlap, type TimeSlot } from "@/lib/seat-management";
 import {
-  demoSettings,
-  isLibrarySettings,
-  isTimeSlotPreferenceArray,
-  settingsTimeSlots,
   weekDays,
   type LibrarySettings,
   type TimeSlotPreference,
 } from "@/lib/settings-management";
+import type { MembershipPlan } from "@/lib/student-management";
 
 const tabs = [
   { id: "general", label: "General", icon: Building2 },
   { id: "hours", label: "Operating hours", icon: Clock3 },
   { id: "slots", label: "Time slots", icon: Settings2 },
+  { id: "memberships", label: "Membership plans", icon: BadgeIndianRupee },
   { id: "receipts", label: "Receipts", icon: ReceiptText },
   { id: "notifications", label: "Notifications", icon: BellRing },
   { id: "account", label: "Account & security", icon: ShieldCheck },
 ] as const;
 type SettingsTab = (typeof tabs)[number]["id"];
+
+function membershipPlanId(name: string) {
+  return (
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "plan"
+  );
+}
 
 function defaultSlotName(slot: TimeSlot) {
   return slot.name;
@@ -103,7 +112,7 @@ function SlotDialog({
           {slot ? "Edit time slot" : "Add time slot"}
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Templates are saved locally; historical assignments stay unchanged.
+          Historical assignments keep their original slot names and hours.
         </p>
         <form onSubmit={submit} className="mt-5 space-y-4">
           <Field label="Slot name">
@@ -164,52 +173,155 @@ function SlotDialog({
   );
 }
 
-type SettingsFormProps = {
-  settings: LibrarySettings;
-  setSettings: Dispatch<SetStateAction<LibrarySettings>>;
-  slots: TimeSlotPreference[];
-  setSlots: Dispatch<SetStateAction<TimeSlotPreference[]>>;
-};
+function MembershipPlanDialog({
+  plan,
+  existing,
+  onCancel,
+  onSave,
+}: {
+  plan: MembershipPlan | null;
+  existing: MembershipPlan[];
+  onCancel: () => void;
+  onSave: (plan: MembershipPlan) => void;
+}) {
+  const [name, setName] = useState(plan?.name ?? "");
+  const [monthlyPrice, setMonthlyPrice] = useState(
+    String(plan?.monthlyPrice ?? 1800),
+  );
+  const [description, setDescription] = useState(plan?.description ?? "");
+  const invalid =
+    !name.trim() ||
+    !Number.isFinite(Number(monthlyPrice)) ||
+    Number(monthlyPrice) < 0 ||
+    existing.some(
+      (item) =>
+        item.id !== plan?.id &&
+        item.name.toLowerCase() === name.trim().toLowerCase(),
+    );
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (invalid) return;
+    onSave({
+      id: plan?.id ?? membershipPlanId(name),
+      name: name.trim(),
+      monthlyPrice: Number(monthlyPrice),
+      description: description.trim(),
+      active: plan?.active ?? true,
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-70 grid place-items-center bg-foreground/40 p-4">
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="membership-plan-title"
+        className="w-full max-w-md rounded-lg border border-border bg-card p-5 text-card-foreground shadow-xl"
+      >
+        <h2 id="membership-plan-title" className="text-lg font-semibold">
+          {plan ? "Edit membership plan" : "Add membership plan"}
+        </h2>
+        <form onSubmit={submit} className="mt-5 space-y-4">
+          <Field label="Plan name">
+            <input
+              autoFocus
+              required
+              maxLength={60}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              className={inputClass}
+            />
+          </Field>
+          <Field label="Monthly price (₹)">
+            <input
+              required
+              type="number"
+              min={0}
+              step="0.01"
+              value={monthlyPrice}
+              onChange={(event) => setMonthlyPrice(event.target.value)}
+              className={inputClass}
+            />
+          </Field>
+          <Field label="Description">
+            <textarea
+              maxLength={200}
+              rows={3}
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              className={`${inputClass} h-auto resize-y py-2.5`}
+            />
+          </Field>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="h-9 rounded-md border border-border px-3 text-sm font-medium hover:bg-muted"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={invalid}
+              className="h-9 rounded-md bg-primary px-3.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+            >
+              Save plan
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
 
 export function SettingsPage() {
-  const [settings, setSettings, settingsReady] = useDemoState(
-    "reading-room-settings",
-    demoSettings,
-    isLibrarySettings,
-  );
-  const [slots, setSlots, slotsReady] = useDemoState(
-    "reading-room-time-slots",
-    settingsTimeSlots,
-    isTimeSlotPreferenceArray,
-  );
-  if (!settingsReady || !slotsReady) {
+  const { configuration, loading, error, saveConfiguration } =
+    useLibraryConfiguration();
+  if (loading) {
     return (
       <Card className="grid min-h-64 place-items-center p-6 text-sm text-muted-foreground">
-        Loading saved settings…
+        Loading library settings…
+      </Card>
+    );
+  }
+  if (error) {
+    return (
+      <Card className="p-6 text-sm text-destructive" role="alert">
+        {error}
       </Card>
     );
   }
   return (
     <SettingsForm
-      settings={settings}
-      setSettings={setSettings}
-      slots={slots}
-      setSlots={setSlots}
+      configuration={configuration}
+      saveConfiguration={saveConfiguration}
     />
   );
 }
 
 function SettingsForm({
-  settings,
-  setSettings,
-  slots,
-  setSlots,
-}: SettingsFormProps) {
-  const [draft, setDraft] = useState<LibrarySettings>(settings);
+  configuration,
+  saveConfiguration,
+}: {
+  configuration: LibraryConfiguration;
+  saveConfiguration: (
+    configuration: LibraryConfiguration,
+  ) => Promise<LibraryConfiguration>;
+}) {
+  const [savedConfiguration, setSavedConfiguration] = useState(configuration);
+  const [draft, setDraft] = useState<LibrarySettings>(configuration.settings);
+  const [slots, setSlots] = useState(configuration.timeSlots);
+  const [plans, setPlans] = useState(configuration.membershipPlans);
   const { toast, showToast, dismissToast } = useToast();
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+  const [saving, setSaving] = useState(false);
   const [slotDialog, setSlotDialog] = useState<
     TimeSlotPreference | null | undefined
+  >();
+  const [planDialog, setPlanDialog] = useState<
+    MembershipPlan | null | undefined
   >();
   const [confirmReset, setConfirmReset] = useState(false);
   const [password, setPassword] = useState({
@@ -217,9 +329,13 @@ function SettingsForm({
     next: "",
     confirm: "",
   });
-  const [signedOut, setSignedOut] = useState(false);
-  const [logoutConfirm, setLogoutConfirm] = useState(false);
-  const isDirty = JSON.stringify(draft) !== JSON.stringify(settings);
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const isDirty =
+    JSON.stringify({
+      settings: draft,
+      timeSlots: slots,
+      membershipPlans: plans,
+    }) !== JSON.stringify(savedConfiguration);
 
   function update<K extends keyof LibrarySettings>(
     key: K,
@@ -241,7 +357,7 @@ function SettingsForm({
     }));
   }
 
-  function saveSettings() {
+  async function saveSettings() {
     if (
       !draft.libraryName.trim() ||
       !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.contactEmail)
@@ -275,13 +391,32 @@ function SettingsForm({
       libraryName: draft.libraryName.trim(),
       receiptPrefix: draft.receiptPrefix.trim().toUpperCase(),
     };
-    setSettings(savedSettings);
-    setDraft(savedSettings);
-    showToast("Library settings saved to this browser.", "success");
+    setSaving(true);
+    try {
+      const saved = await saveConfiguration({
+        settings: savedSettings,
+        timeSlots: slots,
+        membershipPlans: plans,
+      });
+      setSavedConfiguration(saved);
+      setDraft(saved.settings);
+      setSlots(saved.timeSlots);
+      setPlans(saved.membershipPlans);
+      showToast("Library settings saved.", "success");
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : "Settings could not be saved.",
+        "error",
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   function resetSettings() {
-    setDraft(settings);
+    setDraft(savedConfiguration.settings);
+    setSlots(savedConfiguration.timeSlots);
+    setPlans(savedConfiguration.membershipPlans);
     setConfirmReset(false);
     showToast("Unsaved changes were discarded.", "success");
   }
@@ -304,10 +439,7 @@ function SettingsForm({
         : [...current, next],
     );
     setSlotDialog(undefined);
-    showToast(
-      "Time slot template saved. Past assignments were not changed.",
-      "success",
-    );
+    showToast("Time slot changes added to the settings draft.", "success");
   }
 
   function toggleSlot(slot: TimeSlotPreference) {
@@ -316,9 +448,34 @@ function SettingsForm({
         item.id === slot.id ? { ...item, active: item.active === false } : item,
       ),
     );
+    showToast(`${slot.name} status changed in the settings draft.`, "success");
+  }
+
+  function savePlan(nextPlan: MembershipPlan) {
+    setPlans((current) =>
+      current.some((plan) => plan.id === nextPlan.id)
+        ? current.map((plan) => (plan.id === nextPlan.id ? nextPlan : plan))
+        : [...current, nextPlan],
+    );
+    setPlanDialog(undefined);
     showToast(
-      `${slot.name} ${slot.active === false ? "activated" : "deactivated"}. Historical assignments remain intact.`,
+      "Membership plan changes added to the settings draft.",
       "success",
+    );
+  }
+
+  function togglePlan(plan: MembershipPlan) {
+    if (
+      plan.active !== false &&
+      plans.filter((item) => item.active !== false).length <= 1
+    ) {
+      showToast("Keep at least one active membership plan.", "error");
+      return;
+    }
+    setPlans((current) =>
+      current.map((item) =>
+        item.id === plan.id ? { ...item, active: item.active === false } : item,
+      ),
     );
   }
 
@@ -337,21 +494,48 @@ function SettingsForm({
     reader.readAsDataURL(file);
   }
 
-  function changePassword(event: FormEvent<HTMLFormElement>) {
+  async function changePassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (password.next.length < 8) {
-      showToast("Use at least 8 characters for the new password.", "error");
-      return;
-    }
     if (password.next !== password.confirm) {
       showToast("New passwords do not match.", "error");
       return;
     }
-    setPassword({ current: "", next: "", confirm: "" });
-    showToast(
-      "Password change UI validated. No password was changed because authentication is not configured.",
-      "success",
-    );
+    setPasswordSaving(true);
+    try {
+      const response = await fetch("/api/v1/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          currentPassword: password.current,
+          newPassword: password.next,
+        }),
+      });
+      const payload = (await response.json()) as { message?: string };
+      if (!response.ok) {
+        throw new Error(payload.message ?? "Password could not be changed.");
+      }
+      setPassword({ current: "", next: "", confirm: "" });
+      showToast(payload.message ?? "Password changed successfully.", "success");
+    } catch (error) {
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "Password could not be changed.",
+        "error",
+      );
+    } finally {
+      setPasswordSaving(false);
+    }
+  }
+
+  async function signOut() {
+    try {
+      await logout();
+      router.replace("/login");
+      router.refresh();
+    } catch {
+      showToast("Could not end the session. Please try again.", "error");
+    }
   }
 
   const tabTitle = tabs.find((tab) => tab.id === activeTab)?.label ?? "General";
@@ -362,9 +546,6 @@ function SettingsForm({
         <p className="text-sm text-muted-foreground">
           Configure this reading room’s profile, daily schedule, receipts, and
           preferences.
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Settings are demo preferences stored in this browser.
         </p>
       </section>
       <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
@@ -397,8 +578,8 @@ function SettingsForm({
               <div>
                 <h2 className="text-base font-semibold">{tabTitle}</h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Your changes remain in the current form while moving between
-                  settings tabs.
+                  Changes are saved to this library when you select Save
+                  changes.
                 </p>
               </div>
               {isDirty && (
@@ -685,6 +866,99 @@ function SettingsForm({
                     </tbody>
                   </table>
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  Slot edits are drafts until you save the settings.
+                </p>
+              </div>
+            )}
+
+            {activeTab === "memberships" && (
+              <div className="mt-5 space-y-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm text-muted-foreground">
+                      Set the plans and monthly prices used for admissions and
+                      renewals.
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Inactive plans stay on existing student records but cannot
+                      be selected for new admissions.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPlanDialog(null)}
+                    className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90"
+                  >
+                    <BadgeIndianRupee size={15} /> Add plan
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-140 text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/60 text-[11px] uppercase text-muted-foreground">
+                        <th className="px-3 py-3">Plan</th>
+                        <th className="px-3 py-3">Monthly price</th>
+                        <th className="px-3 py-3">Status</th>
+                        <th className="px-3 py-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {plans.map((plan) => (
+                        <tr
+                          key={plan.id}
+                          className="border-b border-border last:border-0"
+                        >
+                          <td className="px-3 py-3">
+                            <span className="block font-medium">
+                              {plan.name}
+                            </span>
+                            <span className="mt-0.5 block text-xs text-muted-foreground">
+                              {plan.description || "No description"}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3 tabular-nums">
+                            {new Intl.NumberFormat("en-IN", {
+                              style: "currency",
+                              currency: "INR",
+                              maximumFractionDigits: 2,
+                            }).format(plan.monthlyPrice)}
+                          </td>
+                          <td className="px-3 py-3">
+                            <span
+                              className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${plan.active === false ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary"}`}
+                            >
+                              {plan.active === false ? "Inactive" : "Active"}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="flex justify-end gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setPlanDialog(plan)}
+                                className="h-8 rounded-md border border-border px-2.5 text-xs font-medium hover:bg-muted"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => togglePlan(plan)}
+                                className="h-8 rounded-md border border-border px-2.5 text-xs font-medium hover:bg-muted"
+                              >
+                                {plan.active === false
+                                  ? "Activate"
+                                  : "Deactivate"}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Plan edits are drafts until you save the settings.
+                </p>
               </div>
             )}
 
@@ -842,7 +1116,7 @@ function SettingsForm({
                     [
                       "admissions",
                       "Admission notifications",
-                      "Show an in-app notice when a demo admission is added.",
+                      "Show an in-app notice when an admission is saved.",
                     ],
                     [
                       "dailyCollection",
@@ -886,7 +1160,7 @@ function SettingsForm({
                 <section className="space-y-4">
                   <div className="flex items-center gap-2">
                     <UserRound size={16} className="text-primary" />
-                    <h3 className="text-sm font-semibold">Current demo user</h3>
+                    <h3 className="text-sm font-semibold">Account profile</h3>
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field label="Name">
@@ -920,16 +1194,15 @@ function SettingsForm({
                     </Field>
                   </div>
                   <div className="rounded-md bg-muted/60 p-3 text-xs leading-5 text-muted-foreground">
-                    No identity provider or server session is configured.
-                    Profile edits are stored as local preferences.
+                    Workspace profile details are saved with the library
+                    settings. Password changes require your current password.
                   </div>
                   <button
                     type="button"
-                    onClick={() => setLogoutConfirm(true)}
+                    onClick={() => void signOut()}
                     className="inline-flex h-9 items-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-muted"
                   >
-                    <LogOut size={15} />{" "}
-                    {signedOut ? "Demo session marked signed out" : "Sign out"}
+                    <LogOut size={15} /> Sign out
                   </button>
                 </section>
                 <section>
@@ -987,20 +1260,23 @@ function SettingsForm({
                     </Field>
                     <button
                       type="submit"
+                      disabled={passwordSaving}
                       className="h-9 rounded-md bg-primary px-3.5 text-sm font-medium text-primary-foreground hover:opacity-90"
                     >
-                      Validate password form
+                      {passwordSaving
+                        ? "Changing password…"
+                        : "Change password"}
                     </button>
                     <p className="text-xs leading-5 text-muted-foreground">
-                      Password changes are not sent to a server in this demo.
+                      Password changes are verified by the authentication API.
                     </p>
                   </form>
                 </section>
                 <section className="rounded-lg border border-border p-4 xl:col-span-2">
                   <h3 className="text-sm font-semibold">Session information</h3>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    Browser session · authentication unavailable · local demo
-                    mode
+                    Authentication is managed through your secure server
+                    session.
                   </p>
                 </section>
               </div>
@@ -1019,10 +1295,10 @@ function SettingsForm({
             <button
               type="button"
               onClick={saveSettings}
-              disabled={!isDirty}
+              disabled={!isDirty || saving}
               className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40"
             >
-              <Save size={15} /> Save changes
+              <Save size={15} /> {saving ? "Saving…" : "Save changes"}
             </button>
           </div>
         </div>
@@ -1036,6 +1312,14 @@ function SettingsForm({
           onSave={saveSlot}
         />
       )}
+      {planDialog !== undefined && (
+        <MembershipPlanDialog
+          plan={planDialog}
+          existing={plans}
+          onCancel={() => setPlanDialog(undefined)}
+          onSave={savePlan}
+        />
+      )}
       {confirmReset && (
         <ConfirmDialog
           title="Discard unsaved settings?"
@@ -1043,22 +1327,6 @@ function SettingsForm({
           confirmLabel="Discard changes"
           onCancel={() => setConfirmReset(false)}
           onConfirm={resetSettings}
-        />
-      )}
-      {logoutConfirm && (
-        <ConfirmDialog
-          title="Mark demo session signed out?"
-          body="This only updates the local demo UI. There is no authentication session to terminate."
-          confirmLabel="Continue"
-          onCancel={() => setLogoutConfirm(false)}
-          onConfirm={() => {
-            setSignedOut(true);
-            setLogoutConfirm(false);
-            showToast(
-              "Demo session marked signed out locally. No backend session was changed.",
-              "success",
-            );
-          }}
         />
       )}
       <ToastViewport toast={toast} onDismiss={dismissToast} />

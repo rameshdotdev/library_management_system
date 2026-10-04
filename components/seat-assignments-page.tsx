@@ -1,21 +1,20 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { AlertCircle, Check, ClipboardList } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { useDemoState } from "@/components/use-demo-state";
+import { useRooms } from "@/components/use-rooms";
+import { useLibraryConfiguration } from "@/components/use-library-configuration";
+import { useSeatAssignments } from "@/components/use-seat-assignments";
 import {
-  demoAssignments,
   defaultTimeSlots,
+  findStudentAssignmentConflict,
   formatTimeRange,
-  findAssignmentConflict,
-  isAssignmentArray,
-  isTimeSlotArray,
-  rooms,
-  students,
+  isSeatAvailableForReservation,
   type AssignmentStatus,
   type SeatAssignment,
 } from "@/lib/seat-management";
+import type { Student } from "@/lib/student-management";
 
 function localToday() {
   const current = new Date();
@@ -25,77 +24,164 @@ function localToday() {
 }
 
 export function SeatAssignmentsPage() {
-  const [assignments, setAssignments] = useDemoState(
-    "reading-room-assignments",
-    demoAssignments,
-    isAssignmentArray,
-  );
-  const [configuredSlots] = useDemoState(
-    "reading-room-time-slots",
-    defaultTimeSlots,
-    isTimeSlotArray,
-  );
-  const slots = configuredSlots.filter((slot) => slot.active !== false);
-  const [studentId, setStudentId] = useState(students[0].id);
-  const [roomId, setRoomId] = useState(rooms[0].id);
-  const [seatNumber, setSeatNumber] = useState(`${rooms[0].seatPrefix}-01`);
+  const { rooms, loading: roomsLoading, error: roomsError } = useRooms();
+  const {
+    assignments,
+    setAssignments,
+    loading: assignmentsLoading,
+    error: assignmentsError,
+  } = useSeatAssignments();
+  const { configuration } = useLibraryConfiguration();
+  const slots = configuration.timeSlots.filter((slot) => slot.active !== false);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [studentsLoading, setStudentsLoading] = useState(true);
+  const [studentsError, setStudentsError] = useState("");
+  const [studentId, setStudentId] = useState("");
+  const [roomId, setRoomId] = useState("");
+  const [seatNumber, setSeatNumber] = useState("");
   const [slotId, setSlotId] = useState(defaultTimeSlots[0].id);
   const [startDate, setStartDate] = useState(localToday);
   const [endDate, setEndDate] = useState(() => addDays(localToday(), 30));
   const [message, setMessage] = useState("");
   const [messageIsError, setMessageIsError] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    async function loadStudents() {
+      try {
+        const response = await fetch("/api/v1/students");
+        const payload = (await response.json()) as {
+          students?: Student[];
+          message?: string;
+        };
+        if (!response.ok || !Array.isArray(payload.students)) {
+          throw new Error(payload.message ?? "Students could not be loaded.");
+        }
+        if (active) setStudents(payload.students);
+      } catch (error) {
+        if (active) {
+          setStudentsError(
+            error instanceof Error
+              ? error.message
+              : "Students could not be loaded.",
+          );
+        }
+      } finally {
+        if (active) setStudentsLoading(false);
+      }
+    }
+    void loadStudents();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const selectedRoom = rooms.find((room) => room.id === roomId) ?? rooms[0];
   const selectedSlot = slots.find((slot) => slot.id === slotId) ?? slots[0];
+  const selectedStudent =
+    students.find((student) => student.id === studentId) ?? students[0];
+  const roomSeats = selectedRoom
+    ? Array.from(
+        { length: selectedRoom.capacity },
+        (_, index) =>
+          `${selectedRoom.seatPrefix}-${String(index + 1).padStart(2, "0")}`,
+      )
+    : [];
+  const availableSeatOptions =
+    selectedRoom && selectedSlot
+      ? roomSeats.filter((seat) =>
+          isSeatAvailableForReservation(
+            {
+              roomId: selectedRoom.id,
+              seatNumber: seat,
+              startTime: selectedSlot.startTime,
+              endTime: selectedSlot.endTime,
+              startDate,
+              endDate,
+            },
+            assignments,
+          ),
+        )
+      : [];
+  const selectedSeat = availableSeatOptions.includes(seatNumber)
+    ? seatNumber
+    : (availableSeatOptions[0] ?? "");
+  const studentAssignmentConflict =
+    selectedStudent && selectedSlot
+      ? findStudentAssignmentConflict(
+          {
+            studentId: selectedStudent.id,
+            startTime: selectedSlot.startTime,
+            endTime: selectedSlot.endTime,
+            startDate,
+            endDate,
+          },
+          assignments,
+        )
+      : undefined;
 
-  function assignSeat(event: FormEvent<HTMLFormElement>) {
+  async function assignSeat(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const student = students.find((item) => item.id === studentId);
+    const student = selectedStudent;
     const slot = selectedSlot;
-    if (!student || !slot) {
-      report("Choose a valid student and time slot.", true);
+    if (!student || !slot || !selectedRoom) {
+      report("Choose a valid student, room, and time slot.", true);
       return;
     }
     if (startDate > endDate) {
       report("End date must be on or after the start date.", true);
       return;
     }
-    const request = {
-      roomId,
-      seatNumber,
-      startTime: slot.startTime,
-      endTime: slot.endTime,
-      startDate,
-      endDate,
-    };
-    const conflict = findAssignmentConflict(request, assignments);
-    if (conflict) {
+    if (studentAssignmentConflict) {
       report(
-        `${seatNumber} is already assigned to ${conflict.studentName} during an overlapping date and time.`,
+        `${student.name} already has ${studentAssignmentConflict.seatNumber} assigned during an overlapping date and time.`,
         true,
       );
       return;
     }
-
-    const today = localToday();
-    const assignment: SeatAssignment = {
-      id: `assign-${String(assignments.length + 1).padStart(3, "0")}`,
-      studentId: student.id,
-      studentName: student.name,
-      roomId,
-      roomName: selectedRoom.name,
-      seatNumber,
-      timeSlotId: slot.id,
-      timeSlotName: slot.name,
+    if (!selectedSeat) {
+      report("No seats are available for this date and time slot.", true);
+      return;
+    }
+    const request = {
+      roomId: selectedRoom.id,
+      seatNumber: selectedSeat,
       startTime: slot.startTime,
       endTime: slot.endTime,
       startDate,
       endDate,
-      status: statusForDates(startDate, endDate, today),
-      createdAt: today,
     };
-    setAssignments((current) => [assignment, ...current]);
-    report(`${student.name} assigned to ${seatNumber}.`, false);
+    setSaving(true);
+    try {
+      const response = await fetch("/api/v1/seat-assignments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...request,
+          studentId: student.id,
+          roomId: selectedRoom.id,
+          timeSlotId: slot.id,
+          timeSlotName: slot.name,
+        }),
+      });
+      const payload = (await response.json()) as {
+        assignment?: SeatAssignment;
+        message?: string;
+      };
+      if (!response.ok || !payload.assignment) {
+        throw new Error(payload.message ?? "Seat could not be assigned.");
+      }
+      setAssignments((current) => [payload.assignment!, ...current]);
+      report(`${student.name} assigned to ${selectedSeat}.`, false);
+    } catch (error) {
+      report(
+        error instanceof Error ? error.message : "Seat could not be assigned.",
+        true,
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   function report(text: string, error: boolean) {
@@ -124,10 +210,19 @@ export function SeatAssignmentsPage() {
           <form onSubmit={assignSeat} className="mt-5 space-y-3">
             <Field label="Student">
               <select
-                value={studentId}
+                value={selectedStudent?.id ?? ""}
                 onChange={(event) => setStudentId(event.target.value)}
+                required
+                disabled={studentsLoading || students.length === 0}
                 className={inputClass}
               >
+                {!students.length && (
+                  <option value="">
+                    {studentsLoading
+                      ? "Loading students…"
+                      : "No students found"}
+                  </option>
+                )}
                 {students.map((student) => (
                   <option key={student.id} value={student.id}>
                     {student.name}
@@ -146,8 +241,12 @@ export function SeatAssignmentsPage() {
                     );
                     setSeatNumber(`${room?.seatPrefix ?? "N"}-01`);
                   }}
+                  disabled={roomsLoading || rooms.length === 0}
                   className={inputClass}
                 >
+                  {!rooms.length && (
+                    <option value="">No rooms available</option>
+                  )}
                   {rooms.map((room) => (
                     <option key={room.id} value={room.id}>
                       {room.name}
@@ -157,15 +256,15 @@ export function SeatAssignmentsPage() {
               </Field>
               <Field label="Seat">
                 <select
-                  value={seatNumber}
+                  value={selectedSeat}
                   onChange={(event) => setSeatNumber(event.target.value)}
+                  disabled={availableSeatOptions.length === 0}
                   className={inputClass}
                 >
-                  {Array.from(
-                    { length: selectedRoom.capacity },
-                    (_, index) =>
-                      `${selectedRoom.seatPrefix}-${String(index + 1).padStart(2, "0")}`,
-                  ).map((seat) => (
+                  {availableSeatOptions.length === 0 && (
+                    <option value="">No available seats</option>
+                  )}
+                  {availableSeatOptions.map((seat) => (
                     <option key={seat} value={seat}>
                       {seat}
                     </option>
@@ -173,6 +272,31 @@ export function SeatAssignmentsPage() {
                 </select>
               </Field>
             </div>
+            {studentAssignmentConflict && (
+              <p role="alert" className="text-xs text-destructive">
+                {selectedStudent?.name} already has seat{" "}
+                {studentAssignmentConflict.seatNumber} during an overlapping
+                date and time.
+              </p>
+            )}
+            {selectedRoom &&
+              selectedSlot &&
+              availableSeatOptions.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No seats are available for this room, date range, and time
+                  slot.
+                </p>
+              )}
+            {roomsError && (
+              <p role="alert" className="text-xs text-destructive">
+                {roomsError}
+              </p>
+            )}
+            {studentsError && (
+              <p role="alert" className="text-xs text-destructive">
+                {studentsError}
+              </p>
+            )}
             <Field label="Time slot">
               <select
                 value={selectedSlot?.id ?? ""}
@@ -218,10 +342,17 @@ export function SeatAssignmentsPage() {
             </div>
             <button
               type="submit"
-              disabled={slots.length === 0}
+              disabled={
+                slots.length === 0 ||
+                !selectedRoom ||
+                students.length === 0 ||
+                availableSeatOptions.length === 0 ||
+                Boolean(studentAssignmentConflict) ||
+                saving
+              }
               className="mt-1 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <Check size={16} /> Assign seat
+              <Check size={16} /> {saving ? "Assigning…" : "Assign seat"}
             </button>
           </form>
           <p
@@ -243,7 +374,7 @@ export function SeatAssignmentsPage() {
           <div className="px-4 py-4 sm:px-5">
             <h2 className="text-base font-semibold">Assignment history</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Current and previous seat reservations.
+              Persistent current and previous seat reservations.
             </p>
           </div>
           <div className="overflow-x-auto">
@@ -298,7 +429,9 @@ export function SeatAssignmentsPage() {
                       colSpan={5}
                       className="px-5 py-10 text-center text-sm text-muted-foreground"
                     >
-                      No assignments yet.
+                      {assignmentsLoading
+                        ? "Loading assignments…"
+                        : assignmentsError || "No assignments yet."}
                     </td>
                   </tr>
                 )}
@@ -308,12 +441,11 @@ export function SeatAssignmentsPage() {
         </Card>
       </section>
 
-      <p className="text-xs leading-5 text-muted-foreground">
-        Demo validation runs in the browser using the current local assignment
-        list. This is not a reservation guarantee: production must enforce the
-        same overlap rules atomically on the server or database to prevent
-        concurrent bookings.
-      </p>
+      {assignmentsError && assignments.length > 0 && (
+        <p role="alert" className="text-xs text-destructive">
+          {assignmentsError}
+        </p>
+      )}
     </div>
   );
 }
@@ -367,13 +499,4 @@ function addDays(date: string, days: number) {
   return new Date(result.getTime() - result.getTimezoneOffset() * 60_000)
     .toISOString()
     .slice(0, 10);
-}
-
-function statusForDates(
-  startDate: string,
-  endDate: string,
-  today: string,
-): AssignmentStatus {
-  if (endDate < today) return "Completed";
-  return startDate > today ? "Scheduled" : "Active";
 }

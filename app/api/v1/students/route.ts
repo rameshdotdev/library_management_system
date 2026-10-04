@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 
+import {
+  CloudinaryConfigurationError,
+  deleteStudentDocument,
+  uploadStudentDocument,
+} from "@/lib/server/cloudinary";
 import { studentCreateSchema } from "@/lib/student-api-schema";
 import {
   authorizeStudentRequest,
@@ -50,6 +55,8 @@ export async function POST(request: Request) {
       );
     }
 
+    const { documentImageDataUrl, ...studentValues } = parsed.data;
+
     const duplicateEmail = await StudentModel.exists({
       libraryId: access.libraryId,
       email: parsed.data.email,
@@ -65,18 +72,34 @@ export async function POST(request: Request) {
       );
     }
 
-    const student = await StudentModel.create({
-      libraryId: access.libraryId,
-      joinedOn: new Date().toISOString().slice(0, 10),
-      payments: [],
-      ...parsed.data,
-    });
+    const uploadedDocument = await uploadStudentDocument(documentImageDataUrl);
+    let student;
+    try {
+      student = await StudentModel.create({
+        libraryId: access.libraryId,
+        joinedOn: new Date().toISOString().slice(0, 10),
+        payments: [],
+        ...studentValues,
+        ...uploadedDocument,
+      });
+    } catch (error) {
+      if (uploadedDocument) {
+        await deleteStudentDocument(uploadedDocument.documentImagePublicId);
+      }
+      throw error;
+    }
 
     return NextResponse.json(
       { success: true, student: serializeStudent(student.toObject()) },
       { status: 201 },
     );
   } catch (error) {
+    if (error instanceof CloudinaryConfigurationError) {
+      return NextResponse.json(
+        { success: false, message: error.message },
+        { status: 503 },
+      );
+    }
     if (isDuplicateKeyError(error)) {
       return NextResponse.json(
         {

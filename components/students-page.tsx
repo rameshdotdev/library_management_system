@@ -24,6 +24,8 @@ import { Card } from "@/components/ui/card";
 import { Field, inputClass } from "@/components/ui/field";
 import { ToastViewport, useToast } from "@/components/ui/toast";
 import { useDemoState } from "@/components/use-demo-state";
+import { useLibraryConfiguration } from "@/components/use-library-configuration";
+import { useSeatAssignments } from "@/components/use-seat-assignments";
 import {
   dateRangesOverlap,
   demoAssignments,
@@ -32,7 +34,7 @@ import {
 import {
   demoStudents,
   isStudentArray,
-  membershipPlans,
+  type MembershipPlan,
   type Student,
   type StudentStatus,
 } from "@/lib/student-management";
@@ -51,12 +53,14 @@ type StudentFormValues = Pick<
   | "phone"
   | "guardianName"
   | "guardianPhone"
-  | "documentImageDataUrl"
   | "status"
   | "membershipName"
   | "membershipEndsOn"
   | "monthlyFee"
->;
+> & {
+  documentImageDataUrl?: string;
+  documentImageUrl?: string;
+};
 
 function todayValue() {
   const today = new Date();
@@ -98,10 +102,12 @@ function StatusBadge({ status }: { status: StudentStatus }) {
 
 function StudentFormDialog({
   student,
+  plans,
   onClose,
   onSave,
 }: {
   student: Student | null;
+  plans: MembershipPlan[];
   onClose: () => void;
   onSave: (values: StudentFormValues) => void;
 }) {
@@ -113,7 +119,7 @@ function StudentFormDialog({
           phone: student.phone,
           guardianName: student.guardianName,
           guardianPhone: student.guardianPhone ?? "",
-          documentImageDataUrl: student.documentImageDataUrl ?? "",
+          documentImageUrl: student.documentImageUrl ?? "",
           status: student.status,
           membershipName: student.membershipName,
           membershipEndsOn: student.membershipEndsOn,
@@ -125,7 +131,7 @@ function StudentFormDialog({
           phone: "",
           guardianName: "",
           guardianPhone: "",
-          documentImageDataUrl: "",
+          documentImageUrl: "",
           status: "Active",
           membershipName: "Standard",
           membershipEndsOn: "2026-12-31",
@@ -224,11 +230,16 @@ function StudentFormDialog({
           <Field label="Document image" className="sm:col-span-2">
             <input
               type="file"
-              accept="image/*"
+              accept=".jpg,.jpeg,.png,.webp"
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 if (!file) return;
-                if (!file.type.startsWith("image/") || file.size > 1_000_000) {
+                if (
+                  !["image/jpeg", "image/png", "image/webp"].includes(
+                    file.type,
+                  ) ||
+                  file.size > 1_000_000
+                ) {
                   event.target.value = "";
                   return;
                 }
@@ -236,6 +247,7 @@ function StudentFormDialog({
                 reader.onload = () => {
                   if (typeof reader.result === "string") {
                     update("documentImageDataUrl", reader.result);
+                    update("documentImageUrl", "");
                   }
                 };
                 reader.readAsDataURL(file);
@@ -245,10 +257,12 @@ function StudentFormDialog({
             <p className="mt-1 text-xs text-muted-foreground">
               Image files up to 1 MB.
             </p>
-            {values.documentImageDataUrl && (
+            {(values.documentImageDataUrl || values.documentImageUrl) && (
               <div className="mt-3 flex items-start gap-3">
                 <Image
-                  src={values.documentImageDataUrl}
+                  src={
+                    values.documentImageDataUrl || values.documentImageUrl || ""
+                  }
                   alt="Student document preview"
                   width={160}
                   height={110}
@@ -257,7 +271,10 @@ function StudentFormDialog({
                 />
                 <button
                   type="button"
-                  onClick={() => update("documentImageDataUrl", "")}
+                  onClick={() => {
+                    update("documentImageDataUrl", "");
+                    update("documentImageUrl", "");
+                  }}
                   className="text-sm text-destructive hover:underline"
                 >
                   Remove image
@@ -269,7 +286,7 @@ function StudentFormDialog({
             <select
               value={values.membershipName}
               onChange={(event) => {
-                const plan = membershipPlans.find(
+                const plan = plans.find(
                   (item) => item.name === event.target.value,
                 );
                 update("membershipName", event.target.value);
@@ -277,7 +294,7 @@ function StudentFormDialog({
               }}
               className={inputClass}
             >
-              {membershipPlans.map((plan) => (
+              {plans.map((plan) => (
                 <option key={plan.id} value={plan.name}>
                   {plan.name}
                 </option>
@@ -390,6 +407,10 @@ function ArchiveDialog({
 }
 
 export function StudentsPage() {
+  const { configuration } = useLibraryConfiguration();
+  const membershipPlans = configuration.membershipPlans.filter(
+    (plan) => plan.active !== false,
+  );
   const [students, setStudents] = useDemoState(
     "reading-room-students",
     demoStudents,
@@ -778,6 +799,7 @@ export function StudentsPage() {
       {formStudent !== undefined && (
         <StudentFormDialog
           student={formStudent}
+          plans={membershipPlans}
           onClose={() => setFormStudent(undefined)}
           onSave={saveStudent}
         />
@@ -795,16 +817,20 @@ export function StudentsPage() {
 }
 
 export function StudentDetailsPage({ studentId }: { studentId: string }) {
+  const { configuration } = useLibraryConfiguration();
+  const membershipPlans = configuration.membershipPlans.filter(
+    (plan) => plan.active !== false,
+  );
   const [students, setStudents] = useDemoState(
     "reading-room-students",
     demoStudents,
     isStudentArray,
   );
-  const [assignments, setAssignments] = useDemoState(
-    "reading-room-assignments",
-    demoAssignments,
-    isAssignmentArray,
-  );
+  const {
+    assignments,
+    loading: assignmentsLoading,
+    error: assignmentsError,
+  } = useSeatAssignments();
 
   useEffect(() => {
     let active = true;
@@ -897,13 +923,6 @@ export function StudentDetailsPage({ studentId }: { studentId: string }) {
       setStudents((current) =>
         current.map((item) =>
           item.id === profile.id ? payload.student! : item,
-        ),
-      );
-      setAssignments((current) =>
-        current.map((item) =>
-          item.studentId === profile.id
-            ? { ...item, studentName: payload.student!.name }
-            : item,
         ),
       );
       setEditing(false);
@@ -1070,7 +1089,11 @@ export function StudentDetailsPage({ studentId }: { studentId: string }) {
             </>
           ) : (
             <p className="mt-4 text-sm leading-6 text-muted-foreground">
-              No current seat reservation is recorded.
+              {assignmentsLoading
+                ? "Loading seat reservation…"
+                : assignmentsError
+                  ? `Could not load reservations: ${assignmentsError}`
+                  : "No current seat reservation is recorded."}
             </p>
           )}
         </Card>
@@ -1078,15 +1101,15 @@ export function StudentDetailsPage({ studentId }: { studentId: string }) {
 
       <Card className="p-4 sm:p-5">
         <h3 className="text-sm font-semibold">Document image</h3>
-        {student.documentImageDataUrl ? (
+        {student.documentImageUrl ? (
           <a
-            href={student.documentImageDataUrl}
+            href={student.documentImageUrl}
             target="_blank"
             rel="noreferrer"
             className="mt-3 inline-block"
           >
             <Image
-              src={student.documentImageDataUrl}
+              src={student.documentImageUrl}
               alt={`${student.name} document`}
               width={640}
               height={420}
@@ -1166,6 +1189,7 @@ export function StudentDetailsPage({ studentId }: { studentId: string }) {
       {editing && (
         <StudentFormDialog
           student={student}
+          plans={membershipPlans}
           onClose={() => setEditing(false)}
           onSave={saveDetails}
         />

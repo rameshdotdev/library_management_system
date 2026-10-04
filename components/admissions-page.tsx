@@ -19,21 +19,19 @@ import { Card } from "@/components/ui/card";
 import { Field, inputClass } from "@/components/ui/field";
 import { ToastViewport, useToast } from "@/components/ui/toast";
 import { useDemoState } from "@/components/use-demo-state";
+import { useLibraryConfiguration } from "@/components/use-library-configuration";
+import { useRooms } from "@/components/use-rooms";
+import { useSeatAssignments } from "@/components/use-seat-assignments";
 import {
-  demoAssignments,
   defaultTimeSlots,
   findAssignmentConflict,
   formatTimeRange,
-  isAssignmentArray,
-  isTimeSlotArray,
-  rooms,
   type SeatAssignment,
 } from "@/lib/seat-management";
 import { generateAdmissionEmail } from "@/lib/admissions";
 import {
   demoStudents,
   isStudentArray,
-  membershipPlans,
   type PaymentRecord,
   type Student,
 } from "@/lib/student-management";
@@ -87,34 +85,27 @@ function addDays(date: string, days: number) {
   return localDate(result);
 }
 
-function nextId(prefix: string, existingIds: string[]) {
-  const largest = existingIds.reduce((max, id) => {
-    const value = Number(id.replace(`${prefix}-`, ""));
-    return Number.isFinite(value) ? Math.max(max, value) : max;
-  }, 0);
-  return `${prefix}-${String(largest + 1).padStart(3, "0")}`;
-}
-
 export function AdmissionsPage() {
+  const { rooms, loading: roomsLoading, error: roomsError } = useRooms();
   const [students, setStudents] = useDemoState(
     "reading-room-students",
     demoStudents,
     isStudentArray,
   );
-  const [assignments, setAssignments] = useDemoState(
-    "reading-room-assignments",
-    demoAssignments,
-    isAssignmentArray,
+  const {
+    assignments,
+    setAssignments,
+    loading: assignmentsLoading,
+  } = useSeatAssignments();
+  const { configuration } = useLibraryConfiguration();
+  const slots = configuration.timeSlots.filter((slot) => slot.active !== false);
+  const membershipPlans = configuration.membershipPlans.filter(
+    (plan) => plan.active !== false,
   );
-  const [configuredSlots] = useDemoState(
-    "reading-room-time-slots",
-    defaultTimeSlots,
-    isTimeSlotArray,
-  );
-  const slots = configuredSlots.filter((slot) => slot.active !== false);
   const { toast, showToast, dismissToast } = useToast();
   const [step, setStep] = useState(0);
   const [completedName, setCompletedName] = useState("");
+  const [savedStudent, setSavedStudent] = useState<Student | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [draft, setDraft] = useState<AdmissionDraft>(() => {
     const today = todayValue();
@@ -126,8 +117,8 @@ export function AdmissionsPage() {
       documentImageDataUrl: "",
       planId: membershipPlans[0].id,
       durationMonths: "1",
-      roomId: rooms[0].id,
-      seatNumber: `${rooms[0].seatPrefix}-01`,
+      roomId: "",
+      seatNumber: "",
       timeSlotId: defaultTimeSlots[0].id,
       startDate: today,
       endDate: addDays(today, 30),
@@ -140,7 +131,8 @@ export function AdmissionsPage() {
   });
 
   const selectedPlan = membershipPlans.find((plan) => plan.id === draft.planId);
-  const selectedRoom = rooms.find((room) => room.id === draft.roomId);
+  const selectedRoom =
+    rooms.find((room) => room.id === draft.roomId) ?? rooms[0];
   const selectedSlot =
     slots.find((slot) => slot.id === draft.timeSlotId) ?? slots[0];
   const membershipTotal =
@@ -202,6 +194,8 @@ export function AdmissionsPage() {
     if (targetStep === 2) {
       if (!selectedRoom || !selectedSlot)
         return "Choose a valid room and time slot.";
+      if (assignmentsLoading)
+        return "Seat availability is still loading. Try again in a moment.";
       if (
         !draft.startDate ||
         !draft.endDate ||
@@ -268,62 +262,71 @@ export function AdmissionsPage() {
       );
       return;
     }
-    const today = todayValue();
     setIsSubmitting(true);
     try {
-      const response = await fetch("/api/v1/admissions", {
+      let student = savedStudent;
+      if (!student) {
+        const response = await fetch("/api/v1/admissions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: draft.name.trim(),
+            phone: draft.phone.trim(),
+            guardianName: draft.guardianName.trim(),
+            guardianPhone: draft.guardianPhone.trim(),
+            documentImageDataUrl: draft.documentImageDataUrl,
+            planId: draft.planId,
+            durationMonths: draft.durationMonths,
+            startDate: draft.startDate,
+            endDate: draft.endDate,
+            admissionFee: draft.admissionFee,
+            deposit: draft.deposit,
+            discount: draft.discount,
+            initialPayment: draft.initialPayment,
+            paymentMethod: draft.paymentMethod,
+          }),
+        });
+        const payload = (await response.json()) as {
+          student?: Student;
+          message?: string;
+        };
+        if (!response.ok || !payload.student) {
+          throw new Error(payload.message ?? "Admission could not be saved.");
+        }
+        student = payload.student;
+        setSavedStudent(student);
+        setStudents((current) => [student!, ...current]);
+      }
+
+      const assignmentResponse = await fetch("/api/v1/seat-assignments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: draft.name.trim(),
-          phone: draft.phone.trim(),
-          guardianName: draft.guardianName.trim(),
-          guardianPhone: draft.guardianPhone.trim(),
-          documentImageDataUrl: draft.documentImageDataUrl,
-          planId: draft.planId,
-          durationMonths: draft.durationMonths,
+          studentId: student.id,
+          roomId: selectedRoom?.id,
+          seatNumber: availableSeat,
+          timeSlotId: selectedSlot?.id,
+          timeSlotName: selectedSlot?.name,
+          startTime: selectedSlot?.startTime,
+          endTime: selectedSlot?.endTime,
           startDate: draft.startDate,
           endDate: draft.endDate,
-          admissionFee: draft.admissionFee,
-          deposit: draft.deposit,
-          discount: draft.discount,
-          initialPayment: draft.initialPayment,
-          paymentMethod: draft.paymentMethod,
         }),
       });
-      const payload = (await response.json()) as {
-        student?: Student;
+      const assignmentPayload = (await assignmentResponse.json()) as {
+        assignment?: SeatAssignment;
         message?: string;
       };
-      if (!response.ok || !payload.student) {
-        throw new Error(payload.message ?? "Admission could not be saved.");
+      if (!assignmentResponse.ok || !assignmentPayload.assignment) {
+        throw new Error(
+          `Student profile is saved, but seat assignment failed: ${assignmentPayload.message ?? "Please retry the reservation."}`,
+        );
       }
 
-      const student = payload.student;
-      const assignment: SeatAssignment = {
-        id: nextId(
-          "assign",
-          assignments.map((item) => item.id),
-        ),
-        studentId: student.id,
-        studentName: student.name,
-        roomId: selectedRoom?.id ?? rooms[0].id,
-        roomName: selectedRoom?.name ?? rooms[0].name,
-        seatNumber: availableSeat,
-        timeSlotId: selectedSlot?.id ?? "",
-        timeSlotName: selectedSlot?.name ?? "",
-        startTime: selectedSlot?.startTime ?? "07:00",
-        endTime: selectedSlot?.endTime ?? "15:00",
-        startDate: draft.startDate,
-        endDate: draft.endDate,
-        status: draft.startDate > today ? "Scheduled" : "Active",
-        createdAt: today,
-      };
-      setStudents((current) => [student, ...current]);
-      setAssignments((current) => [assignment, ...current]);
+      setAssignments((current) => [assignmentPayload.assignment!, ...current]);
       setCompletedName(student.name);
       showToast(
-        `${student.name} was admitted and assigned ${assignment.seatNumber}.`,
+        `${student.name} was admitted and assigned ${assignmentPayload.assignment.seatNumber}.`,
         "success",
       );
     } catch (error) {
@@ -353,6 +356,7 @@ export function AdmissionsPage() {
     }));
     setStep(0);
     setCompletedName("");
+    setSavedStudent(null);
   }
 
   if (completedName) {
@@ -629,16 +633,39 @@ export function AdmissionsPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Room">
                 <select
-                  value={draft.roomId}
-                  onChange={(event) => update("roomId", event.target.value)}
+                  value={selectedRoom?.id ?? ""}
+                  onChange={(event) => {
+                    const room = rooms.find(
+                      (item) => item.id === event.target.value,
+                    );
+                    update("roomId", event.target.value);
+                    update("seatNumber", room ? `${room.seatPrefix}-01` : "");
+                  }}
+                  disabled={roomsLoading || rooms.length === 0}
                   className={inputClass}
                 >
+                  {!rooms.length && (
+                    <option value="">No rooms available</option>
+                  )}
                   {rooms.map((room) => (
                     <option key={room.id} value={room.id}>
                       {room.name} · {room.floor}
                     </option>
                   ))}
                 </select>
+                {roomsError && (
+                  <span className="mt-1 block text-xs text-destructive">
+                    {roomsError}
+                  </span>
+                )}
+                {!roomsLoading && !rooms.length && (
+                  <Link
+                    href="/rooms-seats"
+                    className="mt-1 inline-block text-xs text-primary hover:underline"
+                  >
+                    Create a room first
+                  </Link>
+                )}
               </Field>
               <Field label="Time slot">
                 <select
@@ -699,10 +726,9 @@ export function AdmissionsPage() {
                 </span>
               </div>
               <p className="rounded-md border border-accent/70 bg-accent/30 p-3 text-xs leading-5 text-accent-foreground sm:col-span-2">
-                Demo-only validation checks saved local assignments. Adjacent
-                time slots may share a seat; overlapping time and date ranges
-                cannot. A server must revalidate before real bookings are
-                accepted.
+                Availability is checked again by the server when you confirm.
+                Adjacent time slots may share a seat; overlapping time and date
+                ranges cannot.
               </p>
             </div>
           )}

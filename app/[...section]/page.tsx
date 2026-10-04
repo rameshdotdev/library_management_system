@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { ArrowLeft, Construction } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { AdmissionsPage } from "@/components/admissions-page";
@@ -12,15 +13,13 @@ import { SettingsPage } from "@/components/settings-page";
 import { StaffPage } from "@/components/staff-page";
 import { SubscriptionPage } from "@/components/subscription-page";
 import { StudentDetailsPage, StudentsPage } from "@/components/students-page";
-import { TimeSlotsPage } from "@/components/time-slots-page";
 
 const pageNames: Record<string, string> = {
   students: "Students",
   admissions: "Admissions",
   "rooms-seats": "Rooms & Seats",
   "seat-assignments": "Seat Assignments",
-  "time-slots": "Time Slots",
-  memberships: "Memberships",
+  memberships: "Member Renewals",
   "fees-payments": "Fees & Payments",
   expenses: "Expenses",
   reports: "Reports",
@@ -38,7 +37,7 @@ export default async function PlaceholderPage({
 
   if (slug === "rooms-seats") return <RoomsSeatsPage />;
   if (slug === "seat-assignments") return <SeatAssignmentsPage />;
-  if (slug === "time-slots") return <TimeSlotsPage />;
+  if (slug === "time-slots") redirect("/settings");
   if (slug === "students") return <StudentsPage />;
   if (slug === "admissions") return <AdmissionsPage />;
   if (slug === "memberships") return <MembershipsPage />;

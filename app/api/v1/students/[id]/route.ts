@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
 import mongoose from "mongoose";
+import {
+  CloudinaryConfigurationError,
+  deleteStudentDocument,
+  uploadStudentDocument,
+  type UploadedStudentDocument,
+} from "@/lib/server/cloudinary";
 import { studentUpdateSchema } from "@/lib/student-api-schema";
 import {
   authorizeStudentRequest,
@@ -91,6 +97,7 @@ export async function PATCH(
     }
 
     const nextValues = parsed.data;
+    const { documentImageDataUrl, ...profileValues } = nextValues;
     if (
       nextValues.email &&
       (await StudentModel.exists({
@@ -108,14 +115,44 @@ export async function PATCH(
       );
     }
 
-    Object.assign(current, nextValues);
-    await current.save();
+    const previousPublicId = current.documentImagePublicId;
+    let uploadedDocument: UploadedStudentDocument | undefined;
+    if (documentImageDataUrl !== undefined) {
+      uploadedDocument = await uploadStudentDocument(
+        documentImageDataUrl || undefined,
+      );
+      Object.assign(current, {
+        documentImageUrl: uploadedDocument?.documentImageUrl ?? "",
+        documentImagePublicId: uploadedDocument?.documentImagePublicId ?? "",
+      });
+    }
+    Object.assign(current, profileValues);
+    try {
+      await current.save();
+    } catch (error) {
+      if (uploadedDocument) {
+        await deleteStudentDocument(uploadedDocument.documentImagePublicId);
+      }
+      throw error;
+    }
+    if (
+      previousPublicId &&
+      previousPublicId !== current.documentImagePublicId
+    ) {
+      await deleteStudentDocument(previousPublicId);
+    }
 
     return NextResponse.json({
       success: true,
       student: serializeStudent(current.toObject()),
     });
   } catch (error) {
+    if (error instanceof CloudinaryConfigurationError) {
+      return NextResponse.json(
+        { success: false, message: error.message },
+        { status: 503 },
+      );
+    }
     if (isDuplicateKeyError(error)) {
       return NextResponse.json(
         {

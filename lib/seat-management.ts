@@ -7,6 +7,22 @@ export type Room = {
   capacity: number;
 };
 
+export function isRoomArray(value: unknown): value is Room[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (room) =>
+        typeof room?.id === "string" &&
+        typeof room?.name === "string" &&
+        typeof room?.floor === "string" &&
+        typeof room?.description === "string" &&
+        typeof room?.seatPrefix === "string" &&
+        Number.isInteger(room?.capacity) &&
+        room.capacity > 0,
+    )
+  );
+}
+
 export type TimeSlot = {
   id: string;
   name: string;
@@ -215,6 +231,59 @@ export function findAssignmentConflict(
 ) {
   return assignments.find(
     (existing) =>
+      existing.roomId === requested.roomId &&
+      existing.seatNumber === requested.seatNumber &&
+      dateRangesOverlap(
+        existing.startDate,
+        existing.endDate,
+        requested.startDate,
+        requested.endDate,
+      ) &&
+      intervalsOverlap(
+        existing.startTime,
+        existing.endTime,
+        requested.startTime,
+        requested.endTime,
+      ),
+  );
+}
+
+export function findStudentAssignmentConflict(
+  requested: Pick<
+    SeatAssignment,
+    "studentId" | "startTime" | "endTime" | "startDate" | "endDate"
+  >,
+  assignments: SeatAssignment[],
+) {
+  return assignments.find(
+    (existing) =>
+      existing.studentId === requested.studentId &&
+      existing.status !== "Completed" &&
+      dateRangesOverlap(
+        existing.startDate,
+        existing.endDate,
+        requested.startDate,
+        requested.endDate,
+      ) &&
+      intervalsOverlap(
+        existing.startTime,
+        existing.endTime,
+        requested.startTime,
+        requested.endTime,
+      ),
+  );
+}
+
+export function isSeatAvailableForReservation(
+  requested: Pick<
+    SeatAssignment,
+    "roomId" | "seatNumber" | "startTime" | "endTime" | "startDate" | "endDate"
+  >,
+  assignments: SeatAssignment[],
+) {
+  return !assignments.some(
+    (existing) =>
+      existing.status !== "Completed" &&
       existing.roomId === requested.roomId &&
       existing.seatNumber === requested.seatNumber &&
       dateRangesOverlap(

@@ -38,6 +38,7 @@ export function serializeStudent<
   delete fields._id;
   delete fields.libraryId;
   delete fields.__v;
+  delete fields.documentImagePublicId;
   return { ...fields, id };
 }
 

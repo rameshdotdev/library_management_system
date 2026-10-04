@@ -8,7 +8,8 @@ export interface IStudent {
   phone: string;
   guardianName: string;
   guardianPhone?: string;
-  documentImageDataUrl?: string;
+  documentImageUrl?: string;
+  documentImagePublicId?: string;
   joinedOn: string;
   status: StudentStatus;
   membershipName: string;
@@ -51,7 +52,8 @@ const studentSchema = new Schema<IStudent>(
     phone: { type: String, required: true, trim: true },
     guardianName: { type: String, required: true, trim: true },
     guardianPhone: { type: String, trim: true, default: "" },
-    documentImageDataUrl: { type: String, default: "" },
+    documentImageUrl: { type: String, default: "" },
+    documentImagePublicId: { type: String, default: "" },
     joinedOn: { type: String, required: true },
     status: {
       type: String,
@@ -67,6 +69,18 @@ const studentSchema = new Schema<IStudent>(
 );
 
 studentSchema.index({ libraryId: 1, email: 1 }, { unique: true });
+
+const cachedStudentModel = mongoose.models.Student as
+  | mongoose.Model<IStudent>
+  | undefined;
+
+if (
+  cachedStudentModel &&
+  (!cachedStudentModel.schema.path("documentImageUrl") ||
+    !cachedStudentModel.schema.path("documentImagePublicId"))
+) {
+  mongoose.deleteModel("Student");
+}
 
 export const StudentModel =
   (mongoose.models.Student as mongoose.Model<IStudent>) ||
