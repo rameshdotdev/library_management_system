@@ -8,13 +8,13 @@ import type {
 } from "@/lib/auth/types";
 
 const demoSessionKey = "reading-room-demo-session";
-const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") ?? "";
+
+function getApiBaseUrl(): string {
+  return process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") ?? "";
+}
 
 export const authMode: AuthMode =
-  process.env.NODE_ENV !== "production" &&
-  process.env.NEXT_PUBLIC_AUTH_MODE !== "api"
-    ? "demo"
-    : "api";
+  process.env.NEXT_PUBLIC_AUTH_MODE === "demo" ? "demo" : "api";
 
 export class AuthServiceError extends Error {
   status: number;
@@ -33,11 +33,14 @@ export class AuthServiceError extends Error {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const apiBaseUrl = getApiBaseUrl();
+
   if (!apiBaseUrl) {
     throw new AuthServiceError(
       "Authentication API is not configured. Set NEXT_PUBLIC_API_BASE_URL before using API mode.",
     );
   }
+
   let response: Response;
   try {
     response = await fetch(`${apiBaseUrl}${path}`, {
@@ -50,7 +53,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       },
     });
   } catch {
-    throw new AuthServiceError("The authentication service could not be reached.");
+    throw new AuthServiceError(
+      "The authentication service could not be reached.",
+    );
   }
 
   const body: unknown = await response.json().catch(() => null);
@@ -69,14 +74,19 @@ function demoUserFromEmail(email: string): AuthUser {
   return {
     id: "development-demo-user",
     email,
-    fullName: email.split("@")[0].replace(/[._-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()),
+    fullName: email
+      .split("@")[0]
+      .replace(/[._-]+/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase()),
   };
 }
 
 function readDemoSession(): AuthUser | null {
   if (typeof window === "undefined" || authMode !== "demo") return null;
   try {
-    const value: unknown = JSON.parse(window.sessionStorage.getItem(demoSessionKey) ?? "null");
+    const value: unknown = JSON.parse(
+      window.sessionStorage.getItem(demoSessionKey) ?? "null",
+    );
     if (
       value &&
       typeof value === "object" &&
@@ -105,7 +115,9 @@ export async function login(input: LoginRequest): Promise<AuthUser> {
   return response.user;
 }
 
-export async function register(input: RegisterRequest): Promise<RegistrationResponse> {
+export async function register(
+  input: RegisterRequest,
+): Promise<RegistrationResponse> {
   if (authMode === "demo") {
     return { nextStep: "verify-email" };
   }
@@ -157,9 +169,14 @@ export async function forgotPassword(email: string): Promise<void> {
   });
 }
 
-export async function resetPassword(token: string, password: string): Promise<void> {
+export async function resetPassword(
+  token: string,
+  password: string,
+): Promise<void> {
   if (authMode === "demo") {
-    throw new AuthServiceError("Password reset is unavailable in demo mode. Connect the authentication API to use a reset link.");
+    throw new AuthServiceError(
+      "Password reset is unavailable in demo mode. Connect the authentication API to use a reset link.",
+    );
   }
   await request<void>("/auth/reset-password", {
     method: "POST",
@@ -169,7 +186,9 @@ export async function resetPassword(token: string, password: string): Promise<vo
 
 export async function verifyEmail(token: string): Promise<void> {
   if (authMode === "demo") {
-    throw new AuthServiceError("Email verification is unavailable in demo mode. No email was sent.");
+    throw new AuthServiceError(
+      "Email verification is unavailable in demo mode. No email was sent.",
+    );
   }
   await request<void>("/auth/verify-email", {
     method: "POST",
@@ -179,7 +198,9 @@ export async function verifyEmail(token: string): Promise<void> {
 
 export async function resendVerificationEmail(email: string): Promise<void> {
   if (authMode === "demo") {
-    throw new AuthServiceError("Verification emails are not sent in demo mode.");
+    throw new AuthServiceError(
+      "Verification emails are not sent in demo mode.",
+    );
   }
   await request<void>("/auth/resend-verification", {
     method: "POST",

@@ -49,11 +49,7 @@ export function ForgotPasswordForm() {
       toast.error("Unable to request a reset link.");
     }
   }
-  setServerError(
-    error instanceof AuthServiceError && error.status === 0
-      ? "The reset request could not be sent right now. Please try again later."
-      : "The reset request could not be completed. Please try again later.",
-  );
+
   if (complete) {
     return (
       <div>
