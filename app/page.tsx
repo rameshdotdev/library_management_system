@@ -1,3 +1,5 @@
+"use client";
+
 import {
   Armchair,
   ArrowDownLeft,
@@ -8,9 +10,12 @@ import {
   UsersRound,
 } from "lucide-react";
 import Link from "next/link";
-import { Card } from "@/components/ui/card";
+import { useEffect, useMemo, useState } from "react";
 
-const metrics = [
+import { Card } from "@/components/ui/card";
+import type { DashboardSummary } from "@/lib/dashboard-summary";
+
+const fallbackMetrics = [
   {
     label: "Total seats",
     value: "120",
@@ -113,7 +118,93 @@ const payments = [
   },
 ];
 
+function formatINR(amount: number) {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
 export default function Home() {
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadDashboard() {
+      try {
+        const response = await fetch("/api/v1/dashboard");
+        const payload = (await response.json()) as {
+          summary?: DashboardSummary;
+        };
+        if (active && payload.summary) {
+          setSummary(payload.summary);
+        }
+      } catch {
+        if (active) {
+          setSummary(null);
+        }
+      }
+    }
+
+    void loadDashboard();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const metrics = useMemo(() => {
+    if (!summary) {
+      return fallbackMetrics;
+    }
+
+    return [
+      {
+        label: "Total seats",
+        value: String(summary.totalSeats),
+        note: "Across all rooms",
+        icon: Armchair,
+        tone: "bg-secondary text-primary",
+      },
+      {
+        label: "Occupied seats",
+        value: String(summary.occupiedSeats),
+        note: `${Math.round((summary.occupiedSeats / Math.max(summary.totalSeats, 1)) * 100)}% occupancy today`,
+        icon: UsersRound,
+        tone: "bg-[#e5f1e8] text-[#176b50] dark:bg-[#294236] dark:text-[#a9d9b9]",
+      },
+      {
+        label: "Available seats",
+        value: String(summary.availableSeats),
+        note: "Across all time slots",
+        icon: Armchair,
+        tone: "bg-[#edf0f5] text-[#60758f] dark:bg-[#2a3542] dark:text-[#b1c4dc]",
+      },
+      {
+        label: "Active students",
+        value: String(summary.activeStudents),
+        note: `${summary.onHoldStudents} on hold`,
+        icon: UsersRound,
+        tone: "bg-[#f5ecdf] text-[#9a6b35] dark:bg-[#443625] dark:text-[#e4bc85]",
+      },
+      {
+        label: "Today's collection",
+        value: formatINR(summary.totalCollections),
+        note: `${summary.paymentCount} payments received`,
+        icon: CircleDollarSign,
+        tone: "bg-[#e4f0eb] text-[#247458] dark:bg-[#244237] dark:text-[#93cfb1]",
+      },
+      {
+        label: "Outstanding fees",
+        value: formatINR(summary.outstandingFees),
+        note: `${summary.totalStudents} students tracked`,
+        icon: Clock3,
+        tone: "bg-[#f6e9e5] text-[#b45b4e] dark:bg-[#462e2a] dark:text-[#e89d91]",
+      },
+    ];
+  }, [summary]);
+
   return (
     <div className="space-y-6">
       <section className="flex flex-wrap items-end justify-between gap-3">
@@ -263,7 +354,7 @@ export default function Home() {
           </Link>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[620px] border-collapse text-left text-sm">
+          <table className="w-full min-w-155 border-collapse text-left text-sm">
             <thead>
               <tr className="border-y border-border bg-muted/60 text-xs font-medium uppercase text-muted-foreground">
                 <th className="px-5 py-3">Student</th>

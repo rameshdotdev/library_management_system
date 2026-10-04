@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
   Archive,
   ArrowLeft,
@@ -341,6 +341,30 @@ export function StudentsPage() {
     demoAssignments,
     isAssignmentArray,
   );
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadStudents() {
+      try {
+        const response = await fetch("/api/v1/students");
+        const payload = (await response.json()) as { students?: Student[] };
+        if (active && Array.isArray(payload.students)) {
+          setStudents(payload.students);
+        }
+      } catch {
+        if (active) {
+          setStudents(demoStudents);
+        }
+      }
+    }
+
+    void loadStudents();
+    return () => {
+      active = false;
+    };
+  }, [setStudents]);
+
   const { toast, showToast, dismissToast } = useToast();
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All statuses");
@@ -366,7 +390,7 @@ export function StudentsPage() {
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pageStudents = filtered.slice((page - 1) * pageSize, page * pageSize);
 
-  function saveStudent(values: StudentFormValues) {
+  async function saveStudent(values: StudentFormValues) {
     const duplicateEmail = students.some(
       (item) =>
         item.email.toLowerCase() === values.email.toLowerCase() &&
@@ -381,45 +405,87 @@ export function StudentsPage() {
       return;
     }
 
-    if (formStudent) {
-      setStudents((current) =>
-        current.map((student) =>
-          student.id === formStudent.id ? { ...student, ...values } : student,
-        ),
-      );
-      setAssignments((current) =>
-        current.map((assignment) =>
-          assignment.studentId === formStudent.id
-            ? { ...assignment, studentName: values.name }
-            : assignment,
-        ),
-      );
-      showToast(`${values.name}'s profile has been updated.`, "success");
-    } else {
-      const newStudent: Student = {
-        ...values,
-        id: studentNumber(students),
-        joinedOn: todayValue(),
-        payments: [],
+    try {
+      const endpoint = formStudent
+        ? `/api/v1/students/${formStudent.id}`
+        : "/api/v1/students";
+      const method = formStudent ? "PATCH" : "POST";
+      const response = await fetch(endpoint, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(values),
+      });
+      const payload = (await response.json()) as {
+        student?: Student;
+        message?: string;
       };
-      setStudents((current) => [newStudent, ...current]);
-      showToast(`${values.name} has been added to the directory.`, "success");
+
+      if (!response.ok || !payload.student) {
+        throw new Error(payload.message ?? "Could not save student.");
+      }
+
+      if (formStudent) {
+        setStudents((current) =>
+          current.map((student) =>
+            student.id === formStudent.id ? payload.student! : student,
+          ),
+        );
+        setAssignments((current) =>
+          current.map((assignment) =>
+            assignment.studentId === formStudent.id
+              ? { ...assignment, studentName: payload.student!.name }
+              : assignment,
+          ),
+        );
+        showToast(`${values.name}'s profile has been updated.`, "success");
+      } else {
+        setStudents((current) => [payload.student!, ...current]);
+        showToast(`${values.name} has been added to the directory.`, "success");
+      }
+      setPage(1);
+      setFormStudent(undefined);
+    } catch (error) {
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "The student could not be saved.",
+        "error",
+      );
     }
-    setPage(1);
-    setFormStudent(undefined);
   }
 
-  function archiveSelected() {
+  async function archiveSelected() {
     if (!archiveStudent) return;
-    setStudents((current) =>
-      current.map((student) =>
-        student.id === archiveStudent.id
-          ? { ...student, status: "Archived" }
-          : student,
-      ),
-    );
-    showToast(`${archiveStudent.name} has been archived.`, "success");
-    setArchiveStudent(null);
+
+    try {
+      const response = await fetch(`/api/v1/students/${archiveStudent.id}`, {
+        method: "DELETE",
+      });
+      const payload = (await response.json()) as {
+        student?: Student;
+        message?: string;
+      };
+      if (!response.ok || !payload.student) {
+        throw new Error(
+          payload.message ?? "The student could not be archived.",
+        );
+      }
+
+      setStudents((current) =>
+        current.map((student) =>
+          student.id === archiveStudent.id ? payload.student! : student,
+        ),
+      );
+      showToast(`${archiveStudent.name} has been archived.`, "success");
+      setArchiveStudent(null);
+    } catch (error) {
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "The student could not be archived.",
+        "error",
+      );
+    }
   }
 
   return (
@@ -680,6 +746,37 @@ export function StudentDetailsPage({ studentId }: { studentId: string }) {
     demoAssignments,
     isAssignmentArray,
   );
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadStudent() {
+      try {
+        const response = await fetch(`/api/v1/students/${studentId}`);
+        const payload = (await response.json()) as { student?: Student };
+        if (active && payload.student) {
+          const nextStudent = payload.student;
+          setStudents((current) => {
+            const match = current.find((student) => student.id === studentId);
+            if (match) {
+              return current.map((student) =>
+                student.id === studentId ? nextStudent : student,
+              );
+            }
+            return [nextStudent, ...current];
+          });
+        }
+      } catch {
+        // Keep the existing demo data as fallback.
+      }
+    }
+
+    void loadStudent();
+    return () => {
+      active = false;
+    };
+  }, [setStudents, studentId]);
+
   const { toast, showToast, dismissToast } = useToast();
   const [editing, setEditing] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
@@ -710,7 +807,7 @@ export function StudentDetailsPage({ studentId }: { studentId: string }) {
   }
   const profile = student;
 
-  function saveDetails(values: StudentFormValues) {
+  async function saveDetails(values: StudentFormValues) {
     if (
       students.some(
         (item) =>
@@ -721,30 +818,73 @@ export function StudentDetailsPage({ studentId }: { studentId: string }) {
       showToast("A student with this email address already exists.", "error");
       return;
     }
-    setStudents((current) =>
-      current.map((item) =>
-        item.id === profile.id ? { ...item, ...values } : item,
-      ),
-    );
-    setAssignments((current) =>
-      current.map((item) =>
-        item.studentId === profile.id
-          ? { ...item, studentName: values.name }
-          : item,
-      ),
-    );
-    setEditing(false);
-    showToast("Student profile updated.", "success");
+
+    try {
+      const response = await fetch(`/api/v1/students/${profile.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(values),
+      });
+      const payload = (await response.json()) as {
+        student?: Student;
+        message?: string;
+      };
+      if (!response.ok || !payload.student) {
+        throw new Error(
+          payload.message ?? "Student profile could not be updated.",
+        );
+      }
+
+      setStudents((current) =>
+        current.map((item) =>
+          item.id === profile.id ? payload.student! : item,
+        ),
+      );
+      setAssignments((current) =>
+        current.map((item) =>
+          item.studentId === profile.id
+            ? { ...item, studentName: payload.student!.name }
+            : item,
+        ),
+      );
+      setEditing(false);
+      showToast("Student profile updated.", "success");
+    } catch (error) {
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "Student profile update failed.",
+        "error",
+      );
+    }
   }
 
-  function archiveProfile() {
-    setStudents((current) =>
-      current.map((item) =>
-        item.id === profile.id ? { ...item, status: "Archived" } : item,
-      ),
-    );
-    setConfirmArchive(false);
-    showToast(`${profile.name} has been archived.`, "success");
+  async function archiveProfile() {
+    try {
+      const response = await fetch(`/api/v1/students/${profile.id}`, {
+        method: "DELETE",
+      });
+      const payload = (await response.json()) as {
+        student?: Student;
+        message?: string;
+      };
+      if (!response.ok || !payload.student) {
+        throw new Error(payload.message ?? "Student could not be archived.");
+      }
+
+      setStudents((current) =>
+        current.map((item) =>
+          item.id === profile.id ? payload.student! : item,
+        ),
+      );
+      setConfirmArchive(false);
+      showToast(`${profile.name} has been archived.`, "success");
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : "Student archive failed.",
+        "error",
+      );
+    }
   }
 
   return (
