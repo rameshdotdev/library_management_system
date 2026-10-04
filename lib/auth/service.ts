@@ -10,7 +10,17 @@ import type {
 const demoSessionKey = "reading-room-demo-session";
 
 function getApiBaseUrl(): string {
-  return process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") ?? "";
+  const configuredBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+
+  if (!configuredBaseUrl) {
+    return "/api/v1";
+  }
+
+  if (configuredBaseUrl.includes("localhost:5000")) {
+    return "/api/v1";
+  }
+
+  return configuredBaseUrl.replace(/\/+$/, "");
 }
 
 export const authMode: AuthMode =

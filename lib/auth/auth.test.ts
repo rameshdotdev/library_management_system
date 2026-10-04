@@ -20,9 +20,27 @@ describe("authentication API integration", () => {
     else process.env.NEXT_PUBLIC_AUTH_MODE = original;
   });
 
-  it("requires the API configuration before attempting an API request", async () => {
+  it("uses the same app API route when no external API base URL is configured", async () => {
     delete process.env.NEXT_PUBLIC_API_BASE_URL;
     process.env.NEXT_PUBLIC_AUTH_MODE = "api";
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          user: {
+            id: "user_1",
+            fullName: "Test User",
+            email: "user@example.com",
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
 
     const { login } = await import("@/lib/auth/service");
     await expect(
@@ -31,11 +49,15 @@ describe("authentication API integration", () => {
         password: "Password123!",
         rememberMe: true,
       }),
-    ).rejects.toMatchObject({
-      name: "AuthServiceError",
-      message:
-        "Authentication API is not configured. Set NEXT_PUBLIC_API_BASE_URL before using API mode.",
+    ).resolves.toMatchObject({
+      email: "user@example.com",
+      fullName: "Test User",
     });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/auth/login",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 
   it("accepts safe internal redirect paths and rejects external destinations", () => {
